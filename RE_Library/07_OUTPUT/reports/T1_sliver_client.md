@@ -235,6 +235,31 @@ The signature shapes are themselves informative:
 
 **135 unique request types** were enumerated across the extraction corpus.
 
+> **CORRECTION (round 16, Lead-applied). The figure above is wrong and the error is a CATEGORY error, not
+> an off-by-one.** The 135 is the **row count of `extractions\T1\proto_field_tags.csv`** — a
+> **protobuf *field*-tag table**, described correctly **four lines below** at §3.3. Enumerated from disk
+> by the Lead: 135 data rows, header `"addr","wire","field","label","name","json","enum"`, and the rows
+> are `field=4 Ack`, `field=8 BeaconID`, `field=2 ClientPrivateKey` — **struct fields, not message
+> types.** **Names ending `Req`: 0.**
+>
+> **The correct count, reproduced three ways from `rpc_signatures.txt` (154 signatures, 13,033 B,
+> verified populated): 81 unique request input types (76 strict `*Req`).** See
+> `D23_sliver_id_count_reconciliation.md`.
+>
+> **No artifact is cited for the 135 above** — that absence is the actual defect, and it is why this
+> could not be closed by inspection. It also means the figure cannot be traced to either of the two
+> plausible producers, and the honest range for the request-type count is **76–81**.
+>
+> **Why this matters beyond one number:** D1 §6.3's `135` (an implant-side message-ID table, truth 136)
+> and this `135` were **both published as the same quantity and were cited as mutually corroborating**
+> (`D1:810-812`). **They are different units that happened to print the same integer.** Two counts
+> agreeing while measuring different things is **worse** than one count failing twice, because the
+> agreement is what made it look verified.
+>
+> **Also corrected here:** the §3.2 claims about three protobuf namespaces (`:226-228`) and the
+> streaming-vs-non-streaming discriminator (`:229-232`) were **not re-audited** and should be treated
+> as unverified to the same degree as the figure above. `[source: D23 §8]`
+
 ### 3.3 Protobuf field tags
 
 `extractions\T1\proto_field_tags.csv` (7.4 KB) records protobuf struct tags with resolved

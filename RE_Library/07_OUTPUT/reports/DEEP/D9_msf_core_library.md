@@ -2,6 +2,35 @@
 
 **Scope.** The Metasploit *engine*, not the exploit corpus. Source root: `RE_Library\01_SOURCE_c2\metasploit\`. 2,715 exploit modules are explicitly **out of scope** and are not enumerated here. This document covers `lib/msf/core/` (framework engine: payload pipeline, handlers, encoders, sessions) and `lib/rex/` (the Rex exploitation library: the meterpreter wire protocol, TLV/extension architecture, transports). Priority is mechanism, connection, and library structure — the load-bearing functions, not the incidental ones.
 
+> **SCOPE CORRECTION (round 17, from D22 §4 — Lead-verified).** This document claims `lib/rex/` as
+> covering "transports," and §11 covers `lib/rex/proto/`. **Both statements are accurate; neither reaches
+> the transport decision, because the deciding code is not in this checkout.**
+>
+> **`lib\rex\socket.rb` DOES NOT EXIST. There is no `lib\rex\socket\` directory.** The tree contains
+> `crypto`, `exploit`, `google`, `io`, `logging`, `parser`, `payloads`, `post`, `proto`, `script`,
+> `services`, `ui` — **and no `socket`.** Rex was externalized into gems. §14 already records that
+> `text.rb` and `arch.rb` are absent for this reason; **`socket.rb` is absent the same way and §14 did
+> not name it.**
+>
+> **The decision is one line, in the unpacked gem:
+> `rex-socket-0.1.71\src\lib\rex\socket.rb:51-53` → `return param.comm.create(param)`**, with
+> `comm.rb:48-50` an abstract `create` that **raises `NotImplementedError`** — the base deliberately
+> refuses to decide. `proxies.rb` is 1,518 B and **parses only** (five types, `:7-11`) and never
+> connects; `parameters.rb` parses `'SSL'`:116, `'SSLVersion'`:128, `'Proxies'`:175-176, `'Proto'`:180-181,
+> `'Comm'`:188 and **forwards all four.** Verified across all 302 protocol files: **27 call `Rex::Socket`,
+> ZERO decide locally.**
+>
+> **So §11's "protocol zoo" is accurate as a description of `lib/rex/proto/`, and it answers a different
+> question than "where is transport decided." Five socket files (~78 KB) answer what 302 protocol files
+> appear to be needed for.**
+>
+> **And twelve of the eighteen `rex-*` gems are absent from the corpus entirely** —
+> `04_TOOLS\gems\` holds six (`rex-arch`, `rex-core`, `rex-encoder`, `rex-powershell`, `rex-socket`,
+> `rex-text`). **`rex-exploitation` — the measured rank-1 gap at 13 call sites (cmd_stager, egghunter,
+> jsobfu, omelet, rop_db, seh, vbsobfuscate, browser/http exploit servers) — is not among them.** Any
+> coverage claim spanning Metasploit transport, TLS, or proxy handling must be read against that
+> boundary. **Methods and full working: D22 §4 and §5.**
+
 **Evidence basis.** Every claim is `[source]` — read from this checkout with file:line citations. There is no compiled Metasploit binary in this corpus; nothing here is binary-derived. **Client-vs-implant:** MSF is the *client* side. Ruby source proves what the client sends and expects, and only *infers* the implant's behaviour from the TLV names the client writes. Sections below mark each side explicitly.
 
 **Read coverage.** D7 and D8 together read 6 files of ~9,973 code files. This document adds primary reads of the engine core: the meterpreter packet/parser/dispatcher, the extension architecture and its ID space, `stdapi` core, `payload_generator.rb`, `stager.rb`, `malleable_c2.rb`, `reverse_http.rb`, the encoder interface, and the transport manager.

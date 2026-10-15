@@ -3,20 +3,34 @@
 Function-by-function reversal of every target in the corpus. Written incrementally; this file is
 the board, the report files are the deliverables.
 
-**Last verified (round 16, measured): 2,102.3 KB across 24 files.** Prior header said 1,949.1 KB / 23
-files at round 15; the delta is `D15_sliver_implant_handlers.md` landing (new, 58,604 B),
-`D11_merlin_binaries.md` closing (33,396 → 47,878 B), `D13_covenant_api_control_plane.md` §8 appending
-(79,666 → 96,342 B), `D14_pupy_vidcap_native.md` growing (29,122 → 52,512 B), `D18_merlin`→`D18_mythic`
-landing (new, 9,287 B), and D1/D3/D17 corrections. **The header figure includes `STATUS.md` itself.**
-Counted by `Get-ChildItem -Filter *.md` on `07_OUTPUT\reports\DEEP\`, every row below re-measured this
-round rather than carried.
+**Last verified (round 17, re-measured file by file): 2,330.2 KB across 31 files.** Prior header said
+2,102.3 KB / 24 files at round 16. The delta is **seven new files** — `D19` (46,651 B), `D20` (25,401),
+`D21` (36,193), `D22` (34,637), `D23` (19,615), `D24` (40,456), `D25` (11,237), **+214.2 KB** — plus
+`D17` growing 41,554 → **52,956 B** across four corrections this round.
 
-**Round-16 delta on existing files, and two of them are corrections rather than additions:**
+**The seven lanes that landed this round, and five of them corrected a Lead premise:**
+| file | B | what it did to the premise |
+|---|---:|---|
+| `D19_sliver_taskrunner_proxy.md` | 46,651 | U1 premise **CORRECT**; `proxy/` premise **WRONG both halves** |
+| `D20_duplicated_defect_sweep.md` | 25,401 | **Mythic is PostgreSQL, not MySQL**; **five** correct siblings not four |
+| `D21_pupy_native_defect_audit.md` | 36,193 | `ehFilter` defect is **LATENT, not live** (two gates); tree is **16 `.c`, not 13** |
+| `D22_msf_module_census.md` | 34,637 | D9's "2,715" is **arithmetically right, semantically wrong twice** |
+| `D23_sliver_id_count_reconciliation.md` | 19,615 | T1's 135 is a **CATEGORY error, not D1's off-by-one** |
+| `D24_covenant_client_transport.md` | 40,456 | Q2 **inverted** — the hub path is NOT the used route |
+| `D25_mythic_recv_siblings.md` | 11,237 | key mismatch is **INTENTIONAL** — a defect **removed**, not added |
+
+**Five explicit retractions/corrections of Lead-authored text are recorded in this round's files:
+the MySQL framing (D17 §6.5), the key mismatch (D17 §6.5, retracted), the `proxy/` premise (D19 §1.2),
+T1's 135 (T1 §3.2, corrected inline), and the ehFilter liveness claim (D6 §24.2, contradicted by D21).**
+**That is the verification loop working in the direction that costs the Lead something.**
+
+**Counted by `Get-ChildItem -Filter *.md` on `07_OUTPUT\reports\DEEP\`, every row below re-measured this
+round rather than carried. The header figure includes `STATUS.md` itself.**
+
+**Round-16→17 deltas on existing files:**
 | file | was | now |
 |---|---:|---:|
-| `D1_sliver_implant_code.md` | 167,607 | **172,244** |
-| `D3_android_code.md` | 69,590 | **79,478** |
-| `D17_cross_target_synthesis.md` | 33,829 | **41,554** |
+| `D17_cross_target_synthesis.md` | 41,554 | **52,956** |
 
 | file | bytes | lines | `##` |
 |---|---:|---:|---:|
@@ -896,6 +910,100 @@ invisible by its location. **Relocated to `07_OUTPUT\reports\DEEP\D18_mythic_ops
 (9,287 B / 106 lines) and verified tracked-able. **This is the `.gitignore` lesson in the other
 direction:** the earlier failure was rules that matched nothing; this one was a file that matched a
 rule. **A deliverable's location is part of its correctness.**
+
+### D14 COMPLETE (task-26) — Pupy `vidcap.pyd`, and the probe I aimed was an octave off
+
+**`D14_pupy_vidcap_native.md` — 52,512 B / 775 lines.** Part A (PE/source, 29,122 B) + Part B (Ghidra,
++23,390 B). **Ghidra is free — source-diver closed cleanly, `list_documents` empty.** archive-diver
+closed both task-21 sessions and messaged it directly; no collision.
+
+**Q1/Q2 — the source was never withheld.** `vidcapmodule.cpp` (27,393 B), VC6 `.dsp`/`.dsw`,
+`mkdist.py`, `VideoCapture.py` all present; **LGPL third-party** (`LGPL.txt` 26,934 B). `mkdist.py`
+builds a versioned archive of **prebuilt `.pyd`s for Python 2.0–2.6** — **the prebuilts exist because
+that is how upstream shipped, not because source is withheld.** Both builds 2012-02-28, linker 9.0 /
+VS2008 Express, ~9 min apart; PDB paths name author `Tansay`.
+
+**Q3 — the capability bound, Lead-verified.** Both builds import **exactly the same 6 DLLs**:
+KERNEL32, USER32, ole32, OLEAUT32, MSVCR90, python27. **Zero network (`WS2_32`/WinInet/WinHTTP/urlmon
+all ABSENT), zero file APIs, zero process creation, no GDI/DXGI/D3D.** Lead reproduced over both
+binaries with a positive control:
+```
+amd64: KERNEL32=1  python27=1  NETWORK-MARKERS=0
+x86  : KERNEL32=1  python27=1  NETWORK-MARKERS=0
+```
+**The OLEAUT32 ordinals raw parsing could not resolve were recovered by the provider:**
+`OleCreatePropertyFrame`, `VariantInit`, `VariantClear` — **property-sheet plumbing, not capability.**
+
+**Q4 — the 17% size delta is NOT padding, and the Lead's hint was a near-miss that measurement
+corrected.** Both carry an identical 1,024-byte header/pad. Delta = amd64's **mandatory `.pdata`** +
+`DIR[Exception]` (x64 unwind table, absent on x86) plus `.reloc` **100 B (amd64) vs 880 B (x86)**;
+`.text` 7,025 vs 6,016. **x86 shows no Havoc-style degradation** — the caution not to transfer D5's
+pattern across architectures was correct.
+
+**Q5 — no disk write, no transmit, now proven at instruction level.** `FUN_180001e10` = `getbuffer`:
+`ISampleGrabber::GetConnectedMediaType` → reads `lSampleSize` at `+0x44` → `PyMem_Malloc` →
+`GetCurrentBuffer` → **`Py_BuildValue("(s#,l,l)", buffer, size, width)`** — returns an in-memory Python
+`bytes`. Destructor `FUN_180002130` frees with `CoTaskMemFree` + `IUnknown::Release`. **Clean COM
+lifecycle; the data path terminates in the interpreter's heap.**
+
+**THE ABI-TAG PROOF, INDEPENDENTLY REPRODUCED BY THE LEAD.** Sole export `initvidcap` at
+`0x180002060` decompiles to `Py_InitModule4_64("vidcap", &table, 0, 0, 0x3f5)`.
+**`0x3F5` = 1013 = the Python 2.7 ABI marker** — stronger than the `python27.dll` import, because it is
+a *value the module passes*, not a name it links against.
+
+> **Lead verification, and the Lead's FIRST probe failed on instrument shape.** The first attempt
+> searched the ASCII rendering for string evidence of `0x3f5` and returned **False**. The evidence is
+> an **immediate, not a string.** Correct probe: `push 0x3F5` encodes as `68 F5 03 00 00`, found at
+> **file offset `0x1196`**, occurring **exactly once in the file.**
+>
+> **The probe's SHAPE did not match the evidence's shape.** Zero matches from a correctly-working
+> string search proved nothing about an integer. Same family as the non-recursive glob, the
+> root-anchored `.gitignore`, the Havoc `COMMAND_` prefix, and the count-of-text-vs-question-about-the-
+> program class — **five instances now, four different tools.**
+
+**CORRECTIONS AND NEW FINDINGS FROM THE LANE:**
+
+- **§6 CORRECTED: only `new_Dev` is Python-visible.** Method table at `0x180005290` holds **ONE entry**
+  (`new_Dev`, `METH_VARARGS`) plus terminator, and **`xrefs` returns exactly one reference —
+  `0x18000206d`, inside `initvidcap`.** Part A listed seven names **without distinguishing the Python
+  API from COM interface names**; the other six are COM methods. **Same class as the citation-count
+  pattern: the list was of the text, and the question was about the API surface.**
+- **NEW: unbounded retry loop.** `while (hresult == VFW_E_WRONG_STATE) { Sleep(100); retry; }` with
+  **no counter, no timeout.** A stalled sample grabber **spins forever holding the GIL** — a
+  payload-hang condition, not a Python exception. **This is the only denial-of-service property in the
+  module and it is a defect, not a capability.**
+- **NEW: decoded HRESULTs** — `E_POINTER`, `VFW_E_NOT_CONNECTED`, `VFW_E_WRONG_STATE`, `E_INVALIDARG`,
+  mapping **1:1 onto the four buffer-failure strings.**
+- **NEW: `/GS` stack cookie present.**
+
+**A TYPED PROVIDER FAILURE THE LANE RECORDED RATHER THAN HID:** source-diver asserted
+`0x180002050` (decoded from the method table) was the handler entry. **The provider refused — *"No
+procedure exists at the requested address."*** The address is a live pointer pointing **into** a
+function, not at an entry. **A plausible address derived by arithmetic is not an observed address.**
+Relocated via the enumerated function list. **The provider was right to refuse** — an instrument that
+had agreed would have produced a confident, wrong answer.
+
+**D14 §9 residuals itemized with per-item status.** Highest-value remaining: the `CoCreateInstance`
+graph-construction path (would close the CLSID question) and **17 of 20 `FUN_*` functions unexamined**.
+**x86 was not bound to Ghidra.**
+
+### THE `D11_` COLLISION — FIVE FILES, NOW A NUMBERING DEFECT RATHER THAN A NOTE
+
+Flagged independently by **two lanes** (source-diver this round, and `CROSSREF_AUDIT.md` as failure
+mode C). `07_OUTPUT\reports\DEEP\` contains **five distinct files prefixed `D11_`**:
+
+`D11_havoc_native_win32.md` · `D11_merlin_binaries.md` · `D11_mythic_crypto_postresponse.md` ·
+`D11_pupy_transport_crypto.md` · `D11_sliver_rpc_core.md`
+
+**Also observed:** `D12` covers `D12_havoc_dispatch.md` and `D12_sliver_aitools.md`. **The suffix
+convention (`D11_x`) was introduced to disambiguate and instead made the number non-unique** — a bare
+citation to "D11 §8.2" is ambiguous across five documents, and `CROSSREF_AUDIT` found **real dangling
+references caused by exactly this.**
+
+**No renaming decision made, and none should be made casually:** the files are cited across the corpus
+by these names and a rename would break every existing reference. **The correct fix is a citation
+convention requiring the full filename for collision-family documents** — cheaper and non-breaking.
+**Recorded; the Lead owns the decision.**
 
 ## Platform note
 
