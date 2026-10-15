@@ -3,7 +3,209 @@
 Function-by-function reversal of every target in the corpus. Written incrementally; this file is
 the board, the report files are the deliverables.
 
-**Last verified: 23:41 — 1,093.6 KB across 8 files.** Seven deep reports complete or actively growing.
+**Last verified (round 14, measured): 1,755.2 KB across 19 files.** Prior header said 1,663.3 KB /
+17 files; the delta is the five D11 files completing plus `D12_sliver_aitools.md` and the first
+bytes of `D13_covenant_api_control_plane.md`. Counted by `Get-ChildItem -Filter *.md` on
+`07_OUTPUT\reports\DEEP\`; the figure includes `STATUS.md` itself.
+
+| file | bytes | lines | `##` |
+|---|---:|---:|---:|
+| D1_sliver_implant_code.md | 167,607 | 3,251 | 31 |
+| D2_covenant_code.md | 195,734 | 2,529 | 19 |
+| D3_android_code.md | 69,590 | 790 | 13 |
+| D4_mythic_code.md | 77,300 | 1,133 | 15 |
+| D5_havoc_code.md | 243,155 | 2,851 | 15 |
+| D6_pupy_code.md | 346,283 | 5,272 | 27 |
+| D7_metasploit_code.md | 106,203 | 1,415 | 15 |
+| D8_msf_exploit_side.md | 50,353 | 682 | 11 |
+| D9_msf_core_library.md | 158,915 | 1,512 | 18 |
+| D10_merlin.md | 77,973 | 981 | 8 |
+| D11_sliver_rpc_core.md | 62,167 | 641 | 15 |
+| D11_havoc_native_win32.md | 60,382 | 1,141 | 9 |
+| D11_mythic_crypto_postresponse.md | 34,561 | 417 | 10 |
+| D11_pupy_transport_crypto.md | 38,761 | 517 | 11 |
+| D11_merlin_binaries.md | 20,720 | 318 | 3 |
+| D12_sliver_aitools.md | 30,483 | 313 | 14 |
+| D13_covenant_api_control_plane.md | 1,768 | 26 | — |
+| CROSSREF_AUDIT.md | 26,456 | 308 | 21 |
+| STATUS.md | (this file) | | |
+
+`D13` had just been created when this stamp was taken; `D11_merlin_binaries` is still growing under
+the Ghidra lane. Sizes are a snapshot, not a completion claim.
+
+## Round 14 — THE INSTRUMENT RULE (corpus-level)
+
+Four independent measuring tools failed in this corpus in one session. One shape:
+
+| # | instrument | returned | truth | bias |
+|---|---|---|---|---|
+| 1 | `Get-Content` probe (msf-diver) | **0 cross-references corpus-wide** | 1,648 | quiet |
+| 2 | line-grep `[source` (Lead) | 58 | 59 | loud |
+| 3 | non-recursive glob (×2 lanes) | "flat tree" | nested | loud |
+| 4 | verb-pattern probe (msf-diver) | **8 references** | 53 | quiet |
+
+**The split matters more than the count.** #2 and #3 are *nearly* right — off by one, or
+structurally shallow. They announce themselves the moment anything adjacent is sanity-checked.
+#1 and #4 are clean, tidy, unremarkable numbers that **read as success**. A corpus with no
+cross-references is a perfectly believable finding.
+
+> **An instrument that returns nothing or nearly-nothing is more suspicious than one that returns
+> something wrong. Absence is the one result you cannot distinguish from a dead tool by looking at
+> it. A wrong number at least came from a live process; a zero might have come from nowhere.**
+
+The operative test, and the only one that separates a real zero from a dead probe:
+**make the probe succeed on a target you already know is there, before trusting it on one you
+don't.** You cannot tell by staring at the zero.
+
+**Instance 5, found at commit time and it is the Lead's:** `.gitignore` contained
+`04_TOOLS/gems/*.gem` and `07_OUTPUT/extractions/`. The tree lives under `RE_Library/`, and **a
+`.gitignore` pattern containing a slash is anchored to the .gitignore's own directory** — so every
+slashed rule matched nothing. The only rules that ever worked were the slash-free ones
+(`01_SOURCE_c2/`, `05_TARGETS/`). `git check-ignore -v` on `01_SOURCE_c2/sliver/go.mod` returned
+exit 0 with the rule cited, so the ignore machinery was demonstrably alive; the other paths
+returned exit 1. **The rules looked correct and were inert, and a `git add -A` would have shipped
+9,692 extraction files and 5 redundant third-party archives.** Fixed by prefixing every slashed
+rule with `RE_Library/`; verified 47 leak candidates → 0.
+
+Same shape, fifth instance: the file *looked* like a working ignore list, which is exactly why it
+went unexamined. **A control on one rule would have disproved the other eleven in ten seconds.**
+
+## Round 13 — the citation-count pattern is RETRACTED
+
+The Lead asserted across rounds that lane-reported `[source:]` counts ran "2–3 high" (D3 91→89,
+D9 102→99, D8 38→37) and generalised it into a corpus-wide drift pattern. **android-diver pushed back
+on D10, claiming 59 against the Lead's 58, with three independent methods.**
+
+**android-diver was right and the Lead's probe was broken.** Re-measured four ways:
+
+```
+Select-String -AllMatches            : 59
+raw [regex]::Matches                 : 59
+full [source: ...] tags              : 59
+distinct labels                      : 59
+unclosed / multi-line [ \n source    : 0
+
+THE LEAD'S ORIGINAL PROBE:
+Get-Content | Select-String '\[source'  : 58   ← COUNTS LINES, NOT MATCHES
+```
+
+`Select-String` on piped `Get-Content` returns one object per **line**. Any line carrying two tags is
+undercounted by one. **The pattern was two opposite failure modes wearing one name:** lanes
+over-counting (real, three instances) and the Lead's probe under-counting (D10 is the instance).
+Stated as one pattern, it would have caused a future reader to **discount a correct count**.
+
+**Re-measured corpus-wide with the correct probe:**
+
+| file | `[source:]` tags |
+|---|---:|
+| D6_pupy_code.md | **635** |
+| D2_covenant_code.md | 193 |
+| D9_msf_core_library.md | 164 |
+| D5_havoc_code.md | 106 |
+| D3_android_code.md | 89 |
+| D11_havoc_native_win32.md | 76 |
+| D10_merlin.md | 59 |
+| D7_metasploit_code.md | 46 |
+| D8_msf_exploit_side.md | 39 |
+| D4_mythic_code.md | 35 |
+| D11_mythic_crypto_postresponse.md | 26 |
+| D11_pupy_transport_crypto.md | 9 |
+| D1_sliver_implant_code.md | 3 |
+| D11_sliver_rpc_core.md | 0 |
+| D11_merlin_binaries.md | 0 |
+
+**D6 at 635 was not previously known** — the Lead had been tracking it at 27. It is the most densely
+sourced document in the corpus, ~3.3× D2. Found only because a lane contested a number the Lead was
+using to discount another number.
+
+**Rule for this corpus, added this round:** a count is a measurement only if **both** the probe and
+the enumeration are correct. A line-grep over multi-match content is not a match-count probe.
+
+## Round 13 — Sliver control plane: file size was the wrong instrument
+
+**D11 §Sliver — `server/rpc/` (83 files, 1,210 KB, the largest unread block in the corpus) contains
+ZERO authentication and ZERO permission logic.** The entire operator security model is one 517-line
+file: **`server/transport/middleware.go`**.
+
+- **Operator auth is a 32-byte bearer token, not the client certificate.** `tokenAuthFunc`
+  (`middleware.go:125-156`) reads `authorization: Bearer <token>`, SHA-256s it, `db.OperatorByToken`.
+  mTLS (`mtls.go:77-84`) is the transport precondition; the token is the auth decision. Enforcement is
+  both per-RPC and per-stream (`middleware.go:184-230`), shared allowlist maps.
+- **Permission model = three booleans** (`db/models/operator.go:36-38`): `PermissionAll`,
+  `PermissionBuilder`, `PermissionCrackstation`. **`server/rpc/` never reads or writes them — 0 hits,
+  positive control `GenericHandler` in `rpc/` = 96 hits.** Set in one non-test place
+  (`console/console-admin.go:139-144`), consumed in one (`transport/middleware.go`). Builder = 6
+  allowlisted methods, crackstation = 9. **`acl|RBAC|CanCall|AllowList` → 6 hits, all substring false
+  positives (`Nacl`, `"PENTACLE"`, `...CLoses`) — inspected, not assumed. `IsAdmin|AdminOnly|
+  RequireAdmin` → 0.** So **every `PermissionAll` operator can call every RPC**; the three-way split is
+  a two-purpose service-account model (external build server / cracking rig), not roles.
+- **Local transport has NO auth and NO permission check at all.** `initMiddleware(false)`
+  (`local.go:47`) installs `serverAuthFunc` (`middleware.go:119-123`) returning nil unconditionally and
+  stamping `Operator = "server"`; the permissions interceptor is **absent** from that chain
+  (`middleware.go:88-94`). Security property is process integrity only. **A trust boundary that does
+  not exist, not one that is weak.**
+- **Tailscale = a genuine third trust root** (inference — tsnet reachability decided by the tailnet).
+  **WireGuard = insulation, not a new gate** — binds the mTLS listener inside the tunnel, preserves the
+  same mTLS+token stack.
+- **`tls_key_logger` is operator-settable.** D1 §23 found the `SSLKEYLOGFILE` env-var mechanism; D11
+  finds the config path to it. Two different doors to the same room.
+- **§9.3 crosses the client/server boundary:** `server/db/wasmsqlite/` + the `go_sqlite` build tag +
+  `wazero` in the client's 97 deps ⇒ both ends share one SQLite-over-WASM mechanism.
+- **rtunnels CLOSED (D1 §22):** `MarkPeerClose` (`rtunnels.go:302-337`) records an exclusive terminal
+  sequence, rejects past-window/conflicting/pending-blocked terminals; `StartPeerCloseDeadline`
+  (`:358-374`) is fire-once, nil-safe, `Done()`-cancelled. Bounds 128 frames pending / 128 ingress.
+  `PeerClosePending` / `PeerTeardownPending` / `PeerCloseReady` are deliberately distinct (`:344-346`).
+- **`server/rpc/aitools/` flagged as a NEW CAPABILITY CLASS** — an LLM handed tool definitions mapping
+  to implant operations (`filesystem_tools.go:206-210` defines a `change permissions` tool). Sized but
+  not read. Sequenced as task-23.
+
+**sliver-diver's own retraction, volunteered:** it first claimed the Lead's `db/` count (43 files /
+259 KB) was irreproducible, then found its glob was non-recursive and `db/` has `models/` and
+`wasmsqlite/` subpackages. Recursive: **exactly 43 / 258.9 KB.** All six of the brief's counts correct.
+**Methodological lesson recorded: on a tree with subpackages a non-recursive count is a lower bound,
+not a count.** Second instance this session of the instrument — not the number — being the defect.
+
+## Round 13 — cross-references collide on section numbers
+
+**android-diver's handoff, unprompted, and it prevents false findings:**
+
+- **`§3.7` is claimed by FOUR reports** — D3, D5 (`### 3.7 CommandProc`), D8 (`### 3.7 The composite
+  finding…`), D10 (`### 3.7 Defender-facing summary`). **D3's bare `§3.7` means D8's.**
+- **`§23.3` is claimed by TWO** — D1 (`## 23.3 Replay cache…`) and D6 (`### 23.3 The mutual
+  exclusion…`). **D3's bare `§23.3` means D6's.**
+- A resolver matching bare `§N` against the containing file flags both DANGLING (D3 §3 stops at §3.5;
+  D3 has no §23). Both are **OK-with-qualifier** — D3's prose names each target. **Resolution order
+  adopted for task-22: resolve a bare `§N` against the nearest preceding proper noun or backticked
+  token before falling back to the containing file.**
+- **D3 §1.3.2 resolves cross-file and is explicitly qualified**; D8 §1.3.2 exists. OK.
+- **D10 §3.0 cites the Lead's 39/6/17/1 correctly, §3.0.1 exists, and §5.4→§3.0 loops both directions**
+  (L932, L943) with §7 R-1 back-referencing §5.4, which exists. No orphans.
+- **android-diver found and fixed a provenance gap in its own D10:** §3.0's shape framing was the
+  Lead's but read as android-diver's own cross-tabulation. **Attribution added**; the other
+  Lead-sourced evidence was already credited at eight locations.
+
+## Round 13 — Lead error, recorded: `merlin.c` / `merlin.def`
+
+The Lead asserted **twice** that `merlin.c` and `merlin.def` are 0 bytes, the **second time inside an
+invented causal mechanism** (`buildmode=c-archive` emits empty stubs). Re-measured:
+
+```
+merlin.c    1,642 B   SHA-256 9C6806FC76015DC4968DB2F38D9E13BA…
+merlin.def    882 B   SHA-256 3E634445666C4091A740483826345B12…
+merlin.c[0..63] -> "#include <windows.h>\n#include <stdio.h>\n#include \"main.h\"…"
+```
+
+All four copies in `RE_Library` are identically non-empty; no empty copy exists. android-diver
+corrected it twice with hashes. **The DLL-is-Go conclusion survives; the mechanism was fabricated.**
+The invention was **more damaging than the original error** because it told a reader to skip the two
+most informative files in `data/bin` — `merlin.c:41-45` is the sRDI entry point
+(`int Magic(char *url){ Merlin(url); }`) and `merlin.def` carries seven exports including
+**`DllInstall` / `DllRegisterServer` / `DllUnregisterServer`**, a regsvr32/COM delivery primitive
+alongside sRDI from the same DLL.
+
+**Rule, added this round:** a false explanation attached to a false measurement is worse than the bare
+error. When a number is wrong, retract the number and **stop** — do not supply a mechanism to explain
+a value that was never measured.
 
 ## Lead verification performed this round (round 5)
 

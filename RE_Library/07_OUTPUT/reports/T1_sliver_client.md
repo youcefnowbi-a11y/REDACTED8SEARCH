@@ -317,7 +317,9 @@ Derived via REA `search_procedures` over the Ghidra symbol table
 
 ### 4.2 Methodological correction — the earlier negative result was WRONG
 
-An earlier pass over this target reported:
+**Attribution (added 2026-10-04, per Lead's explicit instruction; this line is the only change to this section): the "earlier pass" below is the Lead's ground-truth note, relayed to this lane in the task message. This report originally rendered it as an unattributed pass, which is why it read as unverifiable in later review. The source is named now; every methodological claim below stands unchanged.**
+
+The earlier pass reported:
 
 > *"the client carries no plaintext crypto algorithm labels as Go symbols"*
 

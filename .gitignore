@@ -1,29 +1,44 @@
 # ── RE_Library : what ships is the ANALYSIS, not the corpus ──
 # Sources are public at known commits; binaries are 3rd-party and large.
+#
+# ANCHORING NOTE — this file lives at the repo root, and the tree lives under
+# RE_Library/. A .gitignore pattern containing a slash is anchored to THIS
+# directory, so `07_OUTPUT/extractions/` matches nothing. Every rule below that
+# names a subpath therefore carries the `RE_Library/` prefix.
+#
+# The previous revision of this file omitted that prefix on every slashed rule.
+# It looked correct and ignored nothing except the slash-free rule at line ~9.
+# Verified with `git check-ignore -v` against a live control.
 
-# Third-party source clones (public, re-obtainable)
+# Third-party source clones (public, re-obtainable).
+# Slash-free, so these match at any depth — they were the only rules that worked.
 01_SOURCE_c2/
 01_SOURCE_mobile/
-
-# Third-party binaries + extracted archives (large, not ours to redistribute)
 02_BINARIES/
 05_TARGETS/
 03_SAMPLES/
 
-# Scratch: extraction dumps, raw string spills, per-target work products
-07_OUTPUT/extractions/
+# Scratch: extraction dumps, raw string spills, per-target work products.
+RE_Library/07_OUTPUT/extractions/
+extractions/
 
-# Tooling scratch: intermediate .gem extraction layers (data.tar / data.tar.gz)
+# Tooling scratch: intermediate .gem extraction layers (data.tar / data.tar.gz).
 # The unpacked *source* trees (rex-socket-0.1.71/ etc.) stay tracked; only the
 # throwaway stages go. Trailing slash matters: rs/ is scratch, rs3/ is not.
-04_TOOLS/gems/rs/
-04_TOOLS/gems/rs2/
-04_TOOLS/gems/final/
-04_TOOLS/gems/*.gem
-04_TOOLS/gems/**/*.gem
-04_TOOLS/gems/data.tar
-04_TOOLS/gems/**/data.tar
-04_TOOLS/gems/**/*.gz
+RE_Library/04_TOOLS/gems/rs/
+RE_Library/04_TOOLS/gems/rs2/
+RE_Library/04_TOOLS/gems/final/
+RE_Library/04_TOOLS/gems/*.gem
+RE_Library/04_TOOLS/gems/**/*.gem
+RE_Library/04_TOOLS/gems/data.tar
+RE_Library/04_TOOLS/gems/**/data.tar
+RE_Library/04_TOOLS/gems/**/*.gz
+
+# Same patterns without the prefix, so they hold if the tree is ever moved up.
+gems/rs/
+gems/rs2/
+gems/final/
+*.gem
 
 # OS / editor noise
 Thumbs.db

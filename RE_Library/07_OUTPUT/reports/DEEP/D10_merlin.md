@@ -459,7 +459,7 @@ The `standard`/`extended` distinction is not documentation trivia. It partitions
 
 ### 3.0 THE SHAPE FINDING — 39 MODULES OFFER TWO PROGRAMS AND RECORD NO CHOICE
 
-**This supersedes any count-level framing of §3, including the brief's "45 modules fetch code."** Counting *how many* modules point at GitHub measures the loudest property. The structural property is the one that matters:
+**This supersedes any count-level framing of §3, including the brief's "45 modules fetch code."** Counting *how many* modules point at GitHub measures the loudest property. The structural property is the one that matters. **The shape framing is the lead's, and I adopt it because it asks a better question than my draft of this section did** — the cross-tabulation below is my own re-measurement, which reproduces the lead's figures exactly:
 
 | Shape | Modules |
 |---|---|
