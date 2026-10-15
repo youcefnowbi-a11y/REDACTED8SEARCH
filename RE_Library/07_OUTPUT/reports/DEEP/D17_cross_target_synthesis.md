@@ -500,8 +500,61 @@ vbsobfuscate, browser/http exploit servers) — is not among them.**
 TLS / proxy handling was reversed"* is **false as a statement about the checkout**, not because the work
 was skipped but because **the code is not there.** The honest form is: **the *dispatcher* was reversed
 (`rex-socket`, one line), the *decision inputs* were reversed (`parameters.rb`), and the *deciders*
-(`ssl.rb`, `ssl_tcp.rb`, `comm/*.rb`) are partially present — with `comm/local.rb` at 23,093 B
-unexamined.** Twelve gems remain outside the tree entirely.
+(`ssl.rb`, `ssl_tcp.rb`, `comm/local.rb`) are now reversed — D26 read `comm/local.rb` in full.** Twelve
+gems remain outside the tree entirely.
+
+> **~~`comm/local.rb` at 23,093 B unexamined~~ — CLOSED by D26.** The gap this section named as its
+> largest single hole is now read, and **the answer went against this section's own prediction.**
+>
+> **D26 was pre-authorized for three outcomes, and predicted the third — "the consumer is not in the
+> corpus." It was branch one.** `Local` **does** consult `param.proxies` and **does** walk the chain:
+> `:350-352` rewrites the connect target to `proxies.first` so `peerhost` is never resolved directly;
+> `:418-424` walks with `each_cons(2)` — proxy→proxy for intermediate hops, last-proxy→target at the
+> end, **real multi-hop, not one CONNECT**; `:439-567` implements **all five** declared types
+> (SAPNI `:441`, HTTP `:510`, SOCKS4 `:534`, SOCKS5 `:550`, SOCKS5H `:567`, plus `proxy_socks4a` `:594`
+> and `proxy_socks5h` `:615`). Lead-verified on disk.
+>
+> **`proxies.rb` is not an orphan and the gem gap is not a confound for this question.** Enumeration two
+> independent ways: **5 files include `Rex::Socket::Comm`, exactly 1 defines `self.create` — `local.rb`.**
+> The other four are listener/observer mixins hooking `notify_before_socket_create` /
+> `notify_socket_created`; none defines `create`. **The proxy walk needs no second `Comm`; it lives
+> inside `Local`.** D22 §4.4's speculation that an absent gem might hold a proxy-walking `Comm` is
+> retired. **The citation is now earned.**
+>
+> **A pre-authorization that goes unused is itself data.** This section armed a prediction with a
+> section number and a vocabulary for the answer it expected. **The corpus gave the opposite answer, and
+> the correct form of the record is to say so in the section that made the prediction.** An armistice
+> with one's own hypothesis is not a result; **reporting that the hypothesis lost is.**
+
+> **§4c's shape DID appear — one layer over from where this section aimed it.**
+> `local.rb:161-168` is a fail-fast guard whose comment refers to *"the proxy comm"* as **a distinct
+> object that handles its own socket creation** — and **no such class exists anywhere in the corpus.**
+> **The corpus contains evidence of a design component that is absent from the corpus.** Two readings,
+> neither chosen, both `[inferred]`, recorded open at D26 §6/U3: **(A)** the comment is stale —
+> proxying was once delegated to a separate comm, later folded into `Local`; better supported, since
+> `Local` demonstrably does the work the comment attributes elsewhere. **(B)** the comment anticipates
+> an out-of-corpus comm; better supported by present tense and by the fact that the guard only makes
+> sense if such a comm could silently ignore `interface`.
+>
+> **That is genuinely unsettleable from source, and it is the §4c shape in its purest form: the
+> evidence of an absence is itself *inside* the corpus.** Not "the artifact is not here" but **"the
+> artifact here refers to something that is not here."** That is a fifth species, and unlike the fourth
+> it cannot be closed by acquiring the missing file — **because the missing thing is a class, and the
+> corpus proves it once existed.**
+
+> **And the transport layer fails CLOSED.** The same guard at `:165-167` raises `Rex::BindFailed` with
+> reason *"Interface option is incompatible with proxy use"* — **refused loudly with reason text,
+> explicitly *"rather than silently binding to the wrong interface."*** Every proxy branch raises
+> `Rex::ConnectionProxyError` with host/port/type and a specific message (`"blocked by ACL"`,
+> `"returned a non-OK response"`, `"SOCKS4 target host must be an IPv4 address or a hostname"`).
+> **This is the opposite of the bare-rescue swallow pattern D9 §17 recorded for `lib/msf/core/`: the
+> same toolkit fails loudly at the transport layer and silently at the session layer.**
+
+**Load-bearing ordering fact, new from D26: TLS is applied AFTER the proxy walk** (`:426-430`,
+*"Now extend the socket with SSL and perform the handshake"*). **Proxy negotiation completes first,
+then TLS wraps the resulting tunnel end-to-end** — which is why C2-over-HTTPS-through-SOCKS5 works: the
+TLS session is established *through* the tunnel to the real target, so **the proxy never sees
+plaintext.** `[source: D26 §5]`
 
 > **This is a third species of the denominator defect.** §1.0.1 gives three levels: the probe, the
 > attribution, the boundary. **This is a fourth: the artifact is not in the corpus.** A lane can be
@@ -884,3 +937,209 @@ Task-22 (CROSSREF_AUDIT, closed) measured 1,648 edges: **1,626 OK / 16 PARENT-OK
 **Resolution order used throughout D17: the nearest preceding proper noun or backticked token wins,
 before falling back to the containing file.** Where this document cites `D11 §n`, the filename is
 given. Where it cites `§n` bare inside a target's row, it means that target's own report.
+
+---
+
+## 10. What an encoder is FOR, read off three frameworks — and the one that does not encode content
+
+**Three targets in this corpus carry an encoder, and each was built against a different threat model.**
+They look similar in a file listing and are not similar in purpose.
+
+### 10.1 Pupy's DNS codec is a WORD codec wearing a character codec's clothes
+
+**This corrects a premise in the D16 brief, which described `dns_encoder_table.py` as a character-level
+compression table.** Lead-verified from source:
+
+- **`dns_encoder_table.py` is 8 lines / 22,473 bytes** — one single `dict` literal named `TREES`.
+- It holds **five** codebooks, not one, and **two are deliberate empty stubs**: `cdns` and `freedns` are
+  1-entry, 0-bit, single-NUL. `generic` (39 entries) is exactly `DNS_ALPHABET`. `tlds` and `terms` are
+  each **513 entries** — 2⁹+1, the node count of a full Huffman tree over 512 symbols.
+- **`:194` is `if phrase.startswith(term):` — the matcher works on WHOLE MULTI-CHARACTER TERMS**, sorted
+  longest-match-first at `:135`/`:168`. This is not character-level.
+- **And the vocabulary is the finding.** The `terms` symbols are real internet words: `cloud`, `cdn2`,
+  `webdav`, `nextcloud`, `payment`, `member`, `temp`, `correo`, `cloudfunctions`.
+
+> **The codec is a domain-vocabulary word codec, statistically shaped to look like cloud / CDN / payment
+> DNS traffic.** Compression ratio is not the only design goal; **the symbol distribution is a cover
+> story.** A DNS sensor sees words it expects to see in a corporate network, because those are the
+> words the codebook was built from.
+
+**The largest single win is a 256-entry provider list** (`dns_encoder.py:16-70`): `chickenkiller.com`,
+`mooo.com`, `ignorelist.com`, `h4ck.me`, `privatedns.org`, `dyn.mk` — **exactly 256 entries, zero
+duplicates, every one conforming to `DNS_ALPHABET`.** `chr(idx)` costs **8 bits regardless of domain
+length**, so `chickenkiller.com` (17 characters) collapses to **one byte**. **The list is exactly 256
+because the index is a byte** — the size is a boundary artifact of the encoding, not a catalog.
+
+**Two more, both Lead-verified:**
+
+- **A documentation defect: code right, comment wrong.** `dns_encoder.py:351` comments
+  *"3 bits - AMOUNT OF PARTS"*; the code at `:453` does `tables_map |= len(tables) << 6` after a 2-bit
+  shift at `:451`, and decodes with `& 0b11` — **2 bits.** `:446` `rsplit('.', 3)` caps segmentation at
+  **4 parts**, which is exactly what 2 bits holds. **The comment is stale; the code is self-consistent.**
+- **A latent self-comparison.** `server.py:623` guards `self.interval == self.interval` — always true.
+  The `return` requires all three conditions, so the clause is **inert rather than wrong**, recorded as
+  **latent, not live** (D21's vocabulary). A probable typo for `interval == self.interval`.
+
+**The codec's own documentation is honest about carrier preference:** `max_payload_len`
+(`server.py:375-413`) records measured efficiency of **A ~15% vs AAAA ~45%** — AAAA wins because it
+carries 16 payload bytes against A's 4. The length field is **1 byte** (`:411`), **capping the payload
+at 255 B by construction**, with `max_size = max_records * (record_len-1)` — one byte per record buys
+the record index.
+
+**And a hook that is present but never engaged:** `_kex_is_disabled` (`server.py:1375-1376`) is a
+hardcoded `return False`. **A subclass must override it; this class never calls it.**
+
+### 10.2 The three-way comparison this enables
+
+| | **Sliver** | **Havoc** | **Pupy DNS** |
+|---|---|---|---|
+| Encoder purpose | envelope framing | C2 message framing | **traffic disguise** |
+| Works on | bytes | bytes | **words** |
+| What it hides | content | content | **the existence of the channel** |
+| Hardcoded vocabulary | protocol tags | command IDs | **cloud/CDN/payment terms, 256 FreeDNS providers** |
+| Failure mode | typed envelope | silent drop (no `default`) | **degenerates into a plausible DNS session** |
+
+**The third row is the whole point.** Sliver and Havoc hide *what is being said*; Pupy's DNS codec is
+built to hide *that anything is being said at all* — by making the traffic look like the most boring
+traffic on the wire. **The codebook is a cover story written in Huffman.**
+
+**Lead-verified this round:** table is 8 lines / 22,473 B; `:194` `startswith(term)`;
+`:351` "3 bits" vs `:453` `<< 6` + `:451` `<<= 2` (2 bits); `chickenkiller.com` `:25`, `h4ck.me` `:36`,
+`mooo.com` `:48` all present in the provider list. `[source: D16]`
+
+---
+
+## 11. The corpus's own index has an attribution error, and it has been load-bearing for seventeen rounds
+
+**Measured this round, `[verified]` by Lead enumeration of every `.java` under `RE_Library\` excluding `.git`:**
+
+| count | tree |
+|---:|---|
+| **4,164** | other (neither `01_SOURCE_c2` nor `01_SOURCE_mobile`) |
+| **81** | **`01_SOURCE_c2\metasploit`** |
+| 21 | `01_SOURCE_mobile\androrat` |
+| 14 | `01_SOURCE_mobile\ahmyth` |
+| | **total 4,280** |
+
+**The working objective's extension table lists `.java 81` inside a corpus it describes as six C2
+frameworks plus T3 mobile. The 81 is Metasploit — 81 of 81, exactly.** T3 contributes **35** and
+neither number appears in the objective's table.
+
+> **This is a SIXTH species of the denominator defect, and it is not the first five.** Not a probe fault
+> (species 1), not attribution of a source (2), not a boundary drawn wrong (3), not an artifact absent
+> from the corpus (4), not in-corpus evidence of an absent component (5).
+>
+> **Species 6: a correct count of the wrong thing, filed under a heading that makes it read as a
+> different thing.** The instrument was fine. The number was fine. **The label was wrong, and every
+> reader downstream inherited the label rather than the measurement.**
+
+**The same table omits T3's actual figures entirely.** T3 is `01_SOURCE_mobile` at **12,445 files /
+190.4 MB** — not nominal, and far larger than the objective's table implies:
+
+| target | files | size | `.java` | `.smali` | `.xml` | `.js` | `.apk` |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `ahmyth` | 8,437 | 138.6 MB | 14 | 411 | 26 | **3,275** | 0 |
+| `androrat` | 4,008 | 51.8 MB | 21 | **2,479** | 344 | 0 | **1** |
+
+**Two structural consequences:**
+
+1. **AhMyth's weight is 3,275 `.js` files, not its 14 `.java`.** A reader working from the objective's
+   extension table would count Java and measure the smallest thing in the tree. **The table's shape
+   selected the wrong instrument for the target.**
+2. **`.smali` is 2,890 corpus-wide and ALL of it is T3** — `ahmyth` 411, `androrat` 2,479, **zero
+   anywhere else.** T3 is therefore **the only target whose code reaches the analyst as
+   bytecode-decompiled-to-source** rather than as source or as a native binary. REA's
+   `inspect_android_package` and the JADX family exist for exactly that shape and **have not been run
+   once in seventeen rounds** — **a coverage gap in the tooling, not in the artifact.** Recorded as
+   such: *a tool that has never been pointed at the one artifact it was built for.*
+
+**`03_SAMPLES\` is populated but artifact-free** — three `README.md` stubs (214 / 265 / 216 B) and
+`theZoo_families.csv` (14,804 B). **No binaries.** This corrects a Lead claim made earlier the same
+round that the directory was empty.
+
+**The one Android binary in the corpus** is `androrat`'s single `.apk`. **Everything else named as T3 is
+source, bytecode-text, or a stub.**
+
+### 11.1 What this costs, stated plainly
+
+**Seventeen rounds of reports have been written against a corpus whose own index miscounts two of its
+own targets.** The counts inside the reports are largely sound — the lanes measure what they open — but
+**every summary that quoted `81 Java files` as an Android figure quoted the label, not the tree.**
+
+> **A reader who counted the tree would have found this in one command. A reader who read the table
+> would have inherited the error, because the table looks like the output of that command.**
+
+**This is instrument shape 9: a count of the INDEX answering a question about the CORPUS.** The eighth
+shape was a count of the text answering a question about the program; the ninth is a count of the
+catalog answering a question about the collection. **Both are the same move — trusting a summary of a
+measurement over the measurement — one level further out.**
+
+---
+
+## 12. The instrument ledger — every failure this round, in one place, including the Lead's
+
+**The purpose of this section is not humility.** A corpus that logs its own probe failures is measuring
+its own error rate, and **an unlogged false zero is indistinguishable from a true absence** — which
+makes every `[absence]` claim in every report unverifiable without this list.
+
+**Ten logged this round, six lanes plus the Lead. All but one share a single root.**
+
+| # | lane | probe | returned | truth | caught by |
+|---|---|---|---|---|---|
+| 1 | sliver-diver | `^\s*(Msg\w+)\s*=\s*(\d+)` | **0** | 136 `Msg*` | reading the file; `:41-361` is **one `iota` block** |
+| 2 | msf-diver | `'Handler' =>` | **0 of 2,715** | 950 bare tokens | running the probe on a file known to contain it |
+| 3 | msf-diver | `'Rank' =>` | **0 of 2,715** | 2,708 — it is `Rank = NormalRanking`, a **constant** | same control |
+| 4 | msf-diver | `ProxyType::(\w+)\s*=\s*'(\w+)'` | **0** | 5 of 5 | **declarations are BARE inside the module; only references are qualified** |
+| 5 | msf-diver | diff vs expected file sizes | 3 files "CHANGED" | **0** | timestamps: a delta against a **stale baseline** measures everything since the last look |
+| 6 | covenant-diver | `Select-String -Path "$m\**\*.go"` | **0** | exactly 6 | per-file iteration over 399 files |
+| 7 | covenant-diver | member-surface regex for `*Regsvr32*` | **178** | **183** | its own character class **excluded digits** |
+| 8 | archive-diver | glob `sources-windows-py3/**/*` | **0 files** | 16 `.c` / 13 `.h` | malformed glob |
+| 9 | havoc-deep | grep `SSN` | **141** | 0 (all `processName`/`className`) | reading the matches — **an inverted finding, the most dangerous kind** |
+| 10 | **Lead** | `Join-String` in a `Group-Object` pipeline | **150 lines of exception** | the data was fine | re-running clean |
+
+### 12.1 The single root, stated once
+
+> **A probe whose shape does not match the evidence's shape returns a clean, confident, wrong answer —
+> and the wrongness is proportional to how much the instrument overperformed.**
+
+**Nine of the ten are shape mismatches, in three flavours:**
+
+- **Syntactical (1, 2, 3, 4, 6, 8).** The probe was built for the form a symbol is **referenced** in,
+  not the form it is **declared** in. Bare constants inside a module; an `iota` block; a recursive glob
+  whose syntax does not recurse. **Each returned zero, and each zero was true of the probe and false of
+  the target.**
+- **Attributional (9).** The probe found **141**, every one a false positive. **A probe that
+  over-matches is more dangerous than one that under-matches, because a zero invites doubt and a
+  large number invites a finding.** havoc-deep's own words: *"This is the cheapest control in the
+  report and it was the one that mattered."*
+- **Temporal (5).** The baseline was stale, so the delta measured **everything since the last
+  observation** — and would have reported **three writes that never happened.**
+
+### 12.2 The one that is not a shape mismatch — and it is the Lead's
+
+**Failure 10 is different in kind. The instrument was correctly shaped; the operator was not.**
+
+`Join-String` does not exist in this PowerShell. The pipeline threw, `Group-Object` never ran, and the
+output was **150 lines of stack trace around a partial result that looked like data.** The clean
+re-run produced the correct table on the first attempt.
+
+> **A thrown exception that is loud is harmless. The danger is that its OUTPUT SURVIVES.** The
+> measurements printed before the throw were correct and complete — which is exactly why the run
+> looked like a success that had produced an error rather than an error that had produced data.
+
+**This is the same defect class as species 6 (§11): the artifact was right, the wrapper was wrong, and
+the wrapper's shape determined what the reader believed.** Recorded because **the Lead's probe failures
+are the ones nobody else is positioned to catch**, and two of this round's substantive corrections
+(§11's attribution error and the `03_SAMPLES` claim) came from the same source.
+
+### 12.3 What the ledger changes
+
+**A report that logs its own false zeros makes its remaining absences worth reading.** covenant-deep's
+rule stands and is adopted corpus-wide: **"a count is a measurement only if you enumerate it."**
+
+**The counter-rule this ledger adds:**
+
+> **An enumeration is only as complete as the detector's shape — and a probe that returns zero has not
+> measured the target, it has measured itself.** Before any `[absence]` is published, the probe must be
+> shown to succeed on a case known to be present. **Nine of the ten failures above would have been
+> caught by that one control, and all nine were eventually caught by it or by its equivalent.**

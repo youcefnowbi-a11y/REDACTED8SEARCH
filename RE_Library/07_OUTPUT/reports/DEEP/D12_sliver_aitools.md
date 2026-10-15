@@ -78,7 +78,7 @@ completion, err = serverai.CompleteConversationAgentic(
 
 ## 2. The `Backend` interface — why the bypass is structural, not accidental
 
-`Backend` — `rpc/aitools/executor.go:24-53` — is a **29-method interface**: `[src]`
+`Backend` — `rpc/aitools/executor.go:24-53` — is a **28-method interface** *(corrected from 29 — see §14.3)*: `[src]`
 
 | Group | Methods |
 |---|---|
@@ -307,7 +307,97 @@ Stated explicitly because a report that reads as uniformly negative is less accu
 | 2 | Is `aitools` reachable over the local transport? | **The question dissolves.** `aitools` is not a service and has no transport — it is in-process. It inherits *no* fence, which is strictly weaker than the local transport's *omitted-permissions* fence. Entry to it is gated only by the fence on the AI RPC: a token over mTLS/Tailscale/WireGuard, **no token at all over local bufconn**. `[inference]` on D11 §4.4 `[src]` and §1 `[inference]` |
 | 3 | Is there a confirmation gate on the destructive tools? | **No.** Single dispatch point `CallTool` (`executor.go:230`); the package-wide authorization probe returns **2 hits, both prose in tool descriptions** (§4). The three permission booleans **do not map onto the 41 tools at all** — there is no code that could perform such a mapping. `[src]` |
 | 4 | Does LLM output reach an implant without a human? | **Yes, for beacon targets.** `callTargetRPC` (`helpers.go:36-70`) blocks in `waitForBeaconTaskResponse` on async responses; the only pacing is the beacon's check-in interval and `aiToolDefaultWaitSeconds = 60`. The operator sees a stream of what already happened. `[src]` + `[inference]` |
-| 5 | What is `Backend`, and what authority does it carry? | A **29-method interface** (`executor.go:24-53`) satisfied by `*rpc.Server`; it exposes recon, 14 filesystem operations, 10 system operations, two execute primitives, three code-loading primitives, and three extension methods. It is a *narrowing* of ~201 RPCs to 29 by **capability**, carrying **no authority scoping** — an interface in Go grants invocation, not permission. `[src]` |
+| 5 | What is `Backend`, and what authority does it carry? | A **28-method interface** *(corrected from 29 — §14.3)* (`executor.go:24-53`) satisfied by `*rpc.Server`; it exposes recon, 14 filesystem operations, 10 system operations, two execute primitives, three code-loading primitives, and three extension methods. It is a *narrowing* of ~201 RPCs to 28 by **capability**, carrying **no authority scoping** — an interface in Go grants invocation, not permission. **Every method's signature is `context.Context` + protobuf → protobuf; none can carry a principal (§14.2).** `[src]` |
 
 **The finding, stated once:** D11 proved the operator permission model is three booleans consumed in exactly one place. D12 proves the AI tool executor does not pass through that one place. **An operator holding `PermissionAll` is not the constraint that matters here — the constraint that matters is that a model-driven loop can call 41 tools, six of them destructive, on live targets, with no permission check and no human confirmation, while reading untrusted output from those same targets back into its own context.**
+
+---
+
+## 14. Residual closures — §11 items 1 and 2 (added post-publication)
+
+**Two of §11's eight residuals are now materially closed, and they close in the direction §2 and §3 already pointed. Both closures are signature-level analyses; no bodies were read and no provider was used.** `[src]`
+
+**Provenance:** the reading of `buildRequestContext` was supplied by the Lead, who read it and reported it to me rather than editing this lane-owned file. **I re-verified every claim below independently at primary source before recording it**, and one supplied figure was corrected (see §14.3). The Lead's account and my re-derivation agree on the finding.
+
+### 14.1 — §11 item 2: `buildRequestContext` is CLOSED, and by its signature
+
+**`executor.go:629-651`.** The signature is the finding: `[src]`
+
+```go
+func buildRequestContext(ctx context.Context, target toolTarget)
+    (*commonpb.Request, bool, context.Context, context.CancelFunc, error)
+```
+
+**Parameters: `ctx` and a `toolTarget`. That is all.** `toolTarget` is a pair of ID strings (`SessionID`, `BeaconID`) — see the validation at `:630-632`, which rejects the case where both are supplied. **There is no principal, no operator identity, no permission set, no `serverpb` client, no `db` handle.** `[src]`
+
+**Why this closes the residual rather than merely advancing it:** a function whose parameter list cannot express an operator cannot enforce one. **The permission context is not a missing check at this layer — it is not *representable* at this layer.** `[inference]` The body reinforces it: it constructs `&commonpb.Request{Timeout: (int64(time.Second) * timeoutSeconds) - 1}` (`:634-635`), sets `SessionID`/`BeaconID` (`:637-643`), and returns `context.WithTimeout(ctx, ...)` at `:647`. **`commonpb.Request` carries a target and a timeout. It is a routing object, not an authority object.** `[src]`
+
+**The `ctx` it receives is the one that matters, and §2 already established what that context is:** `context.Background()` at `server/rpc/rpc-ai.go:215`. `[src]` **So the chain is now closed end-to-end by type rather than by inference: `context.Background()` → `ctx` → `buildRequestContext(ctx, target)` → a `Request` with no principal → the implant.** `[src]` + `[inference]`
+
+### 14.2 — §11 item 1: the `Backend` interface is CLOSED, and it is 28 methods, not 29
+
+**The narrowed question was: does any `Backend` method take or return a permission-bearing type? Enumerated answer: no. Zero of them.** `[src]`
+
+**Complete signature surface — `executor.go:24-53`, all 28 methods at `:25-52`:** `[src]`
+
+| Method | Signature shape |
+|---|---|
+| `GetSessions`, `GetBeacons` | `(context.Context, *commonpb.Empty) (*clientpb.{Sessions,Beacons}, error)` |
+| `Ls`, `Mv`, `Cp`, `Rm`, `Mkdir`, `Cd`, `Download`, `Pwd`, `Chmod`, `Chown`, `Chtimes`, `Mount` | `(context.Context, *sliverpb.XReq) (*sliverpb.X, error)` |
+| `Ifconfig`, `Netstat`, `Ps`, `GetEnv`, `Ping`, `Screenshot` | `(context.Context, *sliverpb.XReq) (*sliverpb.X, error)` |
+| `Execute`, `ExecuteWindows`, `ExecuteAssembly` | `(context.Context, *sliverpb.{Execute,ExecuteWindows,ExecuteAssembly}Req) (*sliverpb.{Execute,ExecuteAssembly}, error)` |
+| `Sideload`, `SpawnDll` | `(context.Context, *sliverpb.{Sideload,InvokeSpawnDll}Req) (*sliverpb.{Sideload,SpawnDll}, error)` |
+| `RegisterExtension`, `ListExtensions`, `CallExtension` | `(context.Context, *sliverpb.XReq) (*sliverpb.X, error)` |
+
+**The discriminator, run as a single predicate over all 28: methods whose parameters are not `context.Context` + protobuf = 0. Methods mentioning `Permission`, `models.Operator`, `auth`, or a principal type = 0.** `[src]`
+
+**So the interface is uniformly `context.Context` + request → response. It is a *capability* surface, not an *authority* surface, and it is now proven so by enumeration rather than asserted.** `[inference]`
+
+### 14.3 — CORRECTION: the `Backend` interface has **28** methods, not 29
+
+**Recorded in place per the corpus's method standard.** `[src]`
+
+| Source | Figure | Status |
+|---|---|---|
+| D12 §2 and §13 row 5 (this report, as published) | **29 methods** | **WRONG** |
+| The Lead's §14 reading | 29 methods | consistent with my earlier figure |
+| **Re-enumerated at primary source now** | **28 methods** | **CORRECT** |
+
+**Evidence:** the interface opens at `executor.go:24` (`type Backend interface {`) and closes at `:53` (`}`). Method declarations occupy **`:25-52` inclusive — 28 lines, 28 methods, one per line, no blanks.** `[src]`
+
+**Root cause:** the earlier 29 counted the interface's *extent* (`:24-53` spans 30 lines) or an off-by-one on the closing brace, rather than counting the `:` delimiters. **This is the same instrument-shape failure family as D23 Correction 0 — a count taken over a region instead of over the thing itself.** `[inference]` It is a small error with no effect on any finding (the interface's *composition* is unchanged and §2's capability breakdown still holds), but it is the kind of number other lanes will quote, so it is corrected rather than left.
+
+**Requested action (`[inference]`):** if D11 §6.4 or D15 quotes "29-method Backend", the replacement is **28**. I am not editing those files; reporting it as instructed.
+
+### 14.4 — Positive controls for the permission-absence claim
+
+**The §3 absence is the report's load-bearing negative, so it gets the full control treatment. Both controls bite.** `[src]`
+
+| Probe | Scope | Result |
+|---|---:|---|
+| `PermissionAll` / `PermissionBuilder` / `PermissionCrackstation` in `server/rpc/aitools/` | 13 files | **0** |
+| `permissions.` / `GetPermissions` / `HasPermission` in the same | 13 files | **0** |
+| **`models.Operator` in the same** | 13 files | **1 hit — and it is `store_tools_test.go:111`, the string literal `"operator-notes"`.** Not a type reference. |
+| **CONTROL: `models.Operator` in the rest of `server/`** | excl. `aitools` | **29 hits** |
+| **CONTROL: the three permission booleans across `server/`** | | **17 sites in 4 files:** `db/models/operator.go:36-38` (definition), `console/console-admin.go:139,142,144` (set once), `transport/middleware.go:190,193,198,214,217,222` (consumed once), `transport/middleware_crack_test.go` (7, test) |
+| **CONTROL: does the search reach `aitools` code at all?** | `buildRequestContext`/`callTargetRPC` in `aitools/` | **30 hits across 5 files** (`executor.go` 4, `filesystem_tools.go` 10, `helpers.go` 2, `package_tools.go` 6, `system_tools.go` 8) |
+
+**Reading of the controls:** the probe **reaches the package and finds its functions** (30 hits), the permission type **exists and is used 29 times elsewhere in `server/`**, and the three booleans have **exactly one definition site, one write site, and one consumption site**. Against that, `aitools` references the operator type **zero times as a type**. `[src]`
+
+**The `models.` caveat, stated so it cannot mislead:** a search for bare `models.` in `aitools` returns **24 hits (23 in `store_tools.go`, 1 in test)** — which looks like counter-evidence but is not. **Enumerated by type: `models.Credential` 11, `models.Loot` 8, `models.NilUUID` 5, `models.ParseUUIDOrNil` 3.** These are **loot and credential data records** — the subject matter of the store tools — not the operator. **`models.Operator` itself: 0 type references.** `[src]` **An unqualified `models.` count would have produced a false positive here; the qualified probe is what makes the absence real.**
+
+### 14.5 — What is now structurally proven vs what remains
+
+**Proven by type signature (`[src]`):**
+
+1. `buildRequestContext` **cannot receive** an operator — `executor.go:629-651`.
+2. None of the **28** `Backend` methods **can carry** a permission — `executor.go:24-53`.
+3. `rpc-ai.go:215` passes `context.Background()`, and `:218` passes `*rpc.Server` as `Backend` — `[src]`, §1.
+4. The permission booleans are consumed **only** in `transport/middleware.go` — 17 sites across 4 files, one consumer. `[src]`
+
+**The consequence, and it is the sentence §2 should be read with:** **§2's claim that the LLM is a trust principal is no longer an inference from behaviour — it is entailed by three type signatures.** A subsystem that cannot receive an operator identity, handed a context that has none, and invoked through an interface that cannot transmit one, **enforces no operator authority — not because a check was forgotten, but because no check could be written without changing a signature.** `[inference]`
+
+**Remaining §11 residuals, still open:** item 3 (all 41 tool descriptions unread), item 4 (`serverai` read only at boundary), item 5 (AI feature default-enabled state), item 6 (`maxAgenticLoopIterations` value), item 7 (no runtime verification), item 8 (unchanged). **Items 1 and 2 are closed above.**
+
+**One residual this closure *creates*:** if `*rpc.Server`'s concrete implementations of those 28 methods perform internal permission checks, the absence at the `aitools` layer would not matter. **§2's argument is that they do not — because the only consumers of the permission booleans are in `transport/middleware.go`, and `rpc.Server` methods are reached here as direct Go calls that never traverse that middleware.** `[src]` + `[inference]` **That is D11's finding, and it is why these two reports have to be read together: neither is complete alone.**
 
