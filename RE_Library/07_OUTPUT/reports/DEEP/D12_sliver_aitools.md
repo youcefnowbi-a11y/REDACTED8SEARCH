@@ -292,7 +292,10 @@ Stated explicitly because a report that reads as uniformly negative is less accu
 
 - **It does not claim exploitation.** The prompt-injection path in §8 is `[inference]` from the capability surface, not a demonstrated attack.
 - **It does not claim the AI feature is reachable by an unprivileged remote attacker.** Over mTLS/Tailscale/WireGuard the entry RPC requires a valid token (§7). The unfenced entries are: (a) an operator holding `PermissionAll`, and (b) the local transport, whose reachability requires already being inside the server process (D11 §4.4).
-- **It does not establish that `Backend`'s 29 methods perform no internal checks** — see §11 item 1.
+- **It does not establish that `Backend`'s 28 methods perform no internal checks** — see §11 item 1.
+  *(Corrected from 29 by Lead during the index pass — §14.3 below is the lane's own correction, and this
+  line survived it. **The number was stale, not the claim:** §14.2 closes the question on the merits, and
+  the sentence's meaning is unchanged.)*
 - **It does not read or assess the AI provider integration** beyond the loop boundary.
 - **It is source-only and makes no claim about any deployed server's configuration.**
 - **It does not re-derive D11's findings.** D11 §2/§6 are used as the control and cited, not restated.

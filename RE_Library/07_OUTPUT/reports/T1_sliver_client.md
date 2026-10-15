@@ -594,6 +594,31 @@ side, though D1 §1's exclusion argument makes `crypto/rc4` unlikely to be impla
    is vendored dependency**. Any statement about "the size of Sliver's source" that does not split
    these is misleading by roughly an order of magnitude, in either direction depending on framing.
 
+   > **BOUNDARY CORRECTION (Lead, applied after D31).** An earlier revision of this section carried
+   > the row `283 .go / 1,304.5 KB`. **Those two figures have different boundaries** — `283` is the
+   > `.go` count of `implant/` **excluding `vendor/`**, while `1,304.5 KB` is a `.go`-only subtotal of
+   > **`implant/sliver/`**. Both numbers are individually correct; **the row was internally
+   > inconsistent, and a reader dividing one by the other would have derived a wrong mean file size.**
+   >
+   > **The complete, reconciled boundary — Lead re-measured every cell:**
+
+   | Boundary | all files | `.go` | KB (all) | KB (`.go`) |
+   |---|---:|---:|---:|---:|
+   | `implant/` everything | **2,678** | 2,354 | 23,926 | 21,949.4 |
+   | `implant/` excl. `vendor/` | **345** | **283** | 1,419.4 | — |
+   | `implant/sliver/` | **337** | **280** | 1,400.2 | **1,304.5** |
+
+   **`implant/vendor` is the ONLY vendor directory** — `implant/sliver/` contains **zero** nested
+   `vendor/` dirs, which is why *"sliver excl vendor"* and *"sliver everything"* are both **337**.
+   **The `345 − 337 = 8`** are `implant/` root plus `scripts/`: `generate.go`, `go-mod`, `go-sum`,
+   `implant.go`, `README.md`, `scripts/README.md`, `scripts/update-vendor.go`, `scripts/update-vendor.sh`.
+   **`implant/sliver/` all-files is 337 (280 `.go` + 57 non-`.go`, including a 35,821 B `LICENSE.txt`,
+   `main.c`, `main.h`, `english.gz`).**
+   >
+   > **Use these forward:** `implant/` first-party = **345 files / 283 `.go`**; of which
+   > `implant/sliver/` = **337 files / 280 `.go` / 1,304.5 KB `.go` / 1,400.2 KB all**.
+   > `[source: D31 §4, verified independently by Lead]`
+
    Clone `HEAD` is `8e5d2f9dbee99de46dd0193c7e15affb210fc4ca` (dated 2026-10-14); the binary was
    built from `422044af` (2026-10-03). They are **11 days apart**, so the binary is *newer* than
    the clone in wall-clock terms while sitting on an older linear revision — the divergence is

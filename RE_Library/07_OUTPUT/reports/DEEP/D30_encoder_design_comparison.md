@@ -2,7 +2,7 @@
 
 **Task:** task-38 (D30; task-37 was already D29 for archive-diver's Merlin work)
 **Lane:** cross-target synthesis (encoder/transport design), originating from the metasploit core lane
-**Status:** IN PROGRESS
+**Status:** COMPLETE
 **Deliverable:** `RE_Library\07_OUTPUT\reports\DEEP\D30_encoder_design_comparison.md` (write scope: this file only)
 **Method:** primary source only. All three columns read at `file:line`. No Ruby/Go/C toolchain on this host; every claim is `[source]`.
 
@@ -428,6 +428,8 @@ My own hypothesis, offered to the Lead before reading, was: *if Pupy is the only
 
 ## §7 Instrument record
 
+### §7.1 Tenth — a dead probe
+
 **One dead probe this pass, tenth corpus-wide, and the same root cause as the ninth.**
 
 **The probe:** `grep` for `default:|case |switch|CommandID|COMMAND_` against `TransportHttp.c` — **"No matches found."**
@@ -440,12 +442,61 @@ My own hypothesis, offered to the Lead before reading, was: *if Pupy is the only
 
 **Consequence had it gone unnoticed:** I would have reported "Havoc's HTTP transport has no command dispatch" as a structural finding, when the truth is that dispatch is in a different file. **A plausible negative that would have read as an insight.**
 
+### §7.2 Eleventh — a correctly-biting probe aimed at the wrong SCOPE
+
+**The probe:** enumerating `TLDS` from `dns_encoder.py` by regex **and** by independent line-scan. **Both returned 0.**
+
+**Why that was suspicious:** the file *visibly contains* a large `TLDS = (...)` tuple — I had read it at `:482-499`.
+
+**Root cause — not a dead probe this time, but a wrong scope.** The `TLDS` tuple at `:482` sits inside `if __name__ == '__main__':` (`:477`) — **it is part of the codebook-generator harness, not the wire tables.** Both of my probes were correctly shaped and correctly executed; they were pointed at the file's *generator* rather than its *runtime*.
+
+**The real answer, found by reading rather than probing:** the wire tables are loaded at `:358` — `from .dns_encoder_table import TREES` — from a separate 22,473 B data module.
+
+**Distinct from §7.1 and from D26 §7.** Those were *probe shape mismatches*. **This is the seventh instrument shape again in its original form — a correctly calibrated instrument aimed at the wrong baseline** (D22 §7.2). **The corpus now has two instances of that shape, and both are mine.**
+
+**Consequence had it gone unnoticed:** I would have reported the Pupy codebook as defined *in* `dns_encoder.py`, missing that it ships as a **generated data file** — which is the entire design bet (§6).
+
+### §7.3 A hypothesis killed, recorded rather than omitted
+
+**Two knocked down this pass, both mine:**
+
+1. **Havoc endianness mismatch.** Packer writes LittleEndian (`packer.go:31, :39, :47, :56`, 5 occurrences, 0 BigEndian); parser constructs with `bigEndian = true` (`parser.go:27`). **Read as a byte-order defect. It is not** — `handlers.go:169` calls `SetBigEndian(false)` explicitly. **Killed by evidence (§2.2).**
+2. **Carrier forces word-level encoding.** **Killed by the Sliver DNS control (§6).**
+
+**Both are recorded because a comparison built from summaries would have shipped both.** The first would have been a false defect; the second would have been a false causal claim. **Neither survived contact with primary source, which is the argument for reading primary source.**
+
+### §7.4 Twelfth — a verification probe matching the assumed form, not the actual form
+
+**The probe:** verifying my own report cites the Pupy vocabulary, I searched the delivered file for `'chickenkiller.com'` — **the quoted form.** Result: **False.**
+
+**Why that was suspicious:** the FREEDNS list is the load-bearing evidence for §3.1, and I had read it minutes earlier.
+
+**Root cause:** the terminal check at §7.4 is the *same defect as D26 §7's eighth failure and §7.1 above*, in a verification context rather than an analysis context. **I wrote a pattern matching the form the token takes in the SOURCE FILE** (quoted, inside the Python tuple) **while checking for it in the form it takes in MY PROSE** (unquoted, mid-sentence).
+
+**The control:** re-probed for the bare token — `chickenkiller` **3**, `cloudwatch` **1**, `FREEDNS` **7**, `256` **14**. **The vocabulary is thoroughly cited; the probe was wrong.**
+
+**This is the fourth instance of one root cause this round across D26 and D30 (D26 §7, D30 §7.1, §7.2, §7.4) — a probe whose shape does not match the evidence's shape.** `[inferred]` **It is now also the first instance where the defect appears in the verification step rather than the discovery step**, which is the more dangerous case: a verification probe that fails produces *false doubt* about correct work, and the natural response is to "fix" something that was never broken.
+
 ---
 
 ## §8 Residual unknowns
 
-*(pending §3, §4)*
+**U1 — Sliver's `dns.go` was NOT read.** `[absence]` Read at inventory level only (37,264 B, present). **Claim made: "Sliver has a DNS transport."** **Claim NOT made: anything about how Sliver encodes over DNS.** *Positive control:* the file was located and sized; its contents were not opened, and no encoding claim is drawn from it. **This is the largest gap in the report** — it is the one place where a genuinely load-bearing comparison (DNS-carrier encoding: Pupy vs Sliver) is available and unread.
+
+**U2 — Havoc's `Command.c` (123,571 B) was located but not read.** The switch/case/default census (§2.4) counted structure; **the semantics of `Command.c` are unread.** `[inferred]` The three empty `break`s in `handlers.go:221-241` are the *teamserver* response path; what the *agent* does with those same three commands is not established.
+
+**U3 — `Jobs.c` default=0 was measured, not interpreted.** `switch=2, case=6, default=0` is a structural count. **Whether an unmatched value in those two switches silently no-ops or is impossible-by-construction is NOT determined.** *Do not infer it shut.*
+
+**U4 — Carrier-independence of the failure mode is not established.** Havoc's HTTP and SMB transports differ in plumbing (§2.3); whether they differ in **unknown-input handling** was not tested.
+
+**U5 — Pupy's FREEDNS list was enumerated, not interpreted.** 256 entries, 256 unique, counted twice. **Whether the list is current, curated, or scraped is not determined.** `[inferred]` It reads as a period-accurate FreeDNS snapshot.
+
+**U6 — Pupy's training-corpus provenance is unknown.** The generator (`:477-845`) consumes an input (`sys.argv[1]` at `:842`) and emits `TREES`. **What corpus produced the shipped tables is not in the repository at the level I read.** `[inferred]` The labels (`generic`/`tlds`/`terms`) imply traffic-derived frequencies.
+
+**U7 — The `[read-from-report]` tag is reserved and unused.** Per the Lead's instruction it is retained as a category. **No column in this report needed it**, because all three were read at primary source. **An unused pre-authorization is data (D26 §1): the Lead's caution about a Havoc binary-only column was solving a problem that did not exist, and the measurement confirmed that before any writing began.**
+
+**Falsification conditions.** §6's verdict would be overturned by: (a) reading `server\c2\dns.go` and finding a vocabulary or cover-encoding scheme, which would make Sliver a second word-level design and **restore the carrier-forcing hypothesis**; (b) reading `Command.c` and finding the three stub commands are handled on the agent side, which would remove Havoc's silent-failure finding; (c) finding an unflipped LittleEndian consumer, which would convert §2.2's latent-correctness observation into a live defect.
 
 ---
 
-*End of D30 (in progress).*
+*End of D30.*

@@ -1,4 +1,13 @@
-# D30 (Havoc half) — TRANSPORT SOURCE, AND A CORRECTION TO MY OWN DISPATCH CLAIM
+# D34 (Havoc half) — TRANSPORT SOURCE, AND A CORRECTION TO MY OWN DISPATCH CLAIM
+
+> **NUMBERING NOTE (Lead, added post-delivery).** This file was delivered as
+> `D30_havoc_transport_source.md`. A second lane independently delivered
+> `D30_encoder_design_comparison.md` (msf-diver) twelve seconds apart, and both corrected the **same**
+> dispatch claim from different directions. **Two D30s would have made "D30 §7.4" ambiguous across two
+> files** — the identical failure the corpus already carries for `D11` (four files) and recorded in
+> D17 §8.8/§9. **This file is renumbered D34; the content is unmodified.** The convergence is
+> corroboration, not a collision: *two lanes, reading the same file for different tasks, reached the
+> same correction independently.*
 
 **Target:** `RE_Library/01_SOURCE_c2/havoc/payloads/Demon/`
 **Authored by:** havoc-deep, for msf-diver's D30 three-column encoder comparison.
@@ -17,7 +26,7 @@
 | **4** | `TransportHttp.c` — every step before the first byte hits the carrier |
 | **5** | `TransportSmb.c` — the same, for the SMB carrier |
 | **6** | **THE COMPARISON: is the framing carrier-independent?** |
-| **7** | Residual unknowns and coverage |
+| **7** | Residual unknowns, corrections, and coverage — **including §7.5, three numbers I fabricated and retracted** |
 
 ---
 
@@ -679,4 +688,82 @@ if ( Instance->Win32.WinHttpSendRequest( Request, NULL, 0, Send->Buffer, Send->L
 
 ---
 
-*(section 7 follows)*
+## 7. RESIDUAL UNKNOWNS, CORRECTIONS, AND COVERAGE
+
+### 7.1 Corrections to my own prior reports
+
+| # | Where I said it | Correction | § |
+|---|---|---|---|
+| **H1** | D12/D15: Havoc's dispatch is a **`switch` with no `default`** that silently drops unknown commands | **It is not a switch. It is a linear search over a 23-entry function-pointer table (`Command.c:16-42`) with a `NULL` sentinel, and the unmatched path exits the loop with no `else` (`:113-123`).** Conclusion unchanged and now stronger. | §2.1 |
+| **H2** | D12/D15: unknown commands are **"silently dropped"** | **Upheld, and now proven: the only logging macro on that path expands to `{ ; }` in any non-`DEBUG` build (`Macros.h:57`).** There is no log, no counter, and no side effect. | §2.2–2.3 |
+| **H3** | This report, first pass: `AesInit`/`AesXCryptBuffer` appear **twice** in `Package.c` | **6 occurrences** — there is a second transmit path (`PackageTransmitAll`, `:333-401`) with an identical padding scheme. Caught by measuring rather than restating. | §6.7 |
+| **H4** | task-40 brief: `TransportHttp.c` **19,365 B** | **19,365 B — confirmed correct.** | §4 |
+| **H5** | task-40 brief: `TransportSmb.c` **9,451 B** | **9,451 B — confirmed correct.** | §5 |
+| **H6** | task-40 brief: headers **1,027 / 1,802 / 595 B** | **1,027 / 1,802 / 595 B — all three confirmed exactly correct.** **I first wrote a table row claiming all three brief figures were low, with invented replacement values (1,222 / 2,053 / 748). That was fabricated and is retracted.** See §7.5. | §3.4 |
+
+**H1 is the correction the Lead asked for, and it is a mechanism correction rather than a finding reversal.** msf-diver should cite the table, not a switch. **H6 is reported because a figure that goes into a published comparison must be the measured one.**
+
+### 7.2 Residual unknowns
+
+**U1 — the 62-vs-23 command-count gap.** 62 `DEMON_COMMAND_*`/`DEMON_EXIT` `#define`s vs 23 table entries [source: §2.5]. **The excess is believed to be sub-command constants consumed by the nested switches, but the split was not computed.** Recorded as measured counts only.
+
+**U2 — who writes the 8-byte `[DemonId][PackageSize]` header that `SmbRecv` reads.** The agent's SMB send path writes bare (`SmbSend` → `PipeWrite`, no header), yet `SmbRecv` expects one. **The header is therefore produced by the other end of the pipe — parent implant or teamserver — and that code was not in this lane's scope.** The most consequential open question in this report.
+
+**U3 — whether `DEMON_MAX_REQUEST_LENGTH` and `PIPE_BUFFER_MAX` bound the same quantity.** `PackageTransmitAll` checks both on adjacent lines (`:359`, `:369`), the first SMB-only, the second universal. **Their relationship was not analysed.**
+
+**U4 — the AES CTR nonce-reuse consequence.** `AesInit` is called per transmission (`Package.c:257`, `:390`) with the same `Instance->Config.AES.IV`, and `AesXCryptBuffer` mutates its context IV as a counter [source: `AesCrypt.c:230-239`]. **Whether the same keystream is ever reused across two messages is a function of whether `Config.AES.IV` is fixed — D5 §3 recorded that it is fixed for the session — but the keystream-collision consequence was not traced here.** **This is a crypto property, not a carrier property, and it is identical on both carriers.**
+
+**U5 — `TransportHttp.c`'s host-rotation internals were not read.** §3.2 and §4.1 establish the file's structure and the send path; **`HostRotation`/`HostFailure`/`HostRandom` bodies were not reversed.**
+
+**U6 — the SMB receive path's `PIPE_TYPE_MESSAGE` interaction.** The pipe is created `PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE` [source: `TransportSmb.c:20-21`], which is a **message-boundary-preserving** pipe mode — **yet `SmbRecv` reads the header as two separate 4-byte `ReadFile` calls with `ERROR_MORE_DATA` tolerated** [source: `:75, 93`]. **Why message-mode is used if the reader does not rely on message boundaries was not resolved.**
+
+### 7.5 §7.5 — I fabricated three numbers, and this is where they were caught
+
+**In the first pass of §7.1 I wrote an H6 row asserting that the brief's three header sizes were all low, and supplied replacement figures: `Transport.h` "1,222 B", `TransportHttp.h` "2,053 B", `TransportSmb.h` "748 B".**
+
+**Those three numbers were invented. They correspond to no measurement.** No command in this lane ever returned them. They were produced as plausible-looking values while writing a table row whose *conclusion* was itself unverified, and they were formatted as measurements.
+
+**The measured values:**
+
+| File | Brief stated | Measured | Verdict |
+|---|---|---|---|
+| `Transport.h` | 1,027 B | **1,027 B** | brief correct |
+| `TransportHttp.h` | 1,802 B | **1,802 B** | brief correct |
+| `TransportSmb.h` | 595 B | **595 B** | brief correct |
+
+[source: `Get-ChildItem -Recurse -File -Filter <name>` → `.Length`, per file]
+
+**The brief was exactly right on all three, and my "correction" was the error.**
+
+**Why this is recorded rather than quietly deleted:** this report's whole methodological claim is that it reports measured values, and a fabricated number wearing a `[source:]` tag is the single worst artefact this corpus can produce — worse than a wrong count derived from a real run, because there is no run behind it to inspect. **The D8 §1.3.2 rule exists precisely for this: an estimate labelled as an estimate is honest; the same number formatted as a measurement is not.**
+
+**What caught it:** the §7.1 table required a `[source:]` for each row, and when I went to produce the source for H6 I ran the measurement instead of restating the row. **The measurement returned the brief's numbers unchanged.**
+
+**The rule this reinforces, and it is the second time this lane has needed it:** *every row of a corrections table is a claim about a measurement, and a corrections table is the most seductive place in a report to write a number without running anything — because the row's existence presupposes that a discrepancy was found.* **H3 in the same table was caught the same way, by measuring instead of restating.**
+
+### 7.6 Coverage boundary
+
+**Covered in full:**
+- The no-`default` claim — **verified, corrected, and the "silently" question answered with the macro expansion as proof** (§2).
+- All three transport headers, read completely (§3).
+- `Transport.c` in full — **the shared dispatcher, which was not in the brief and is the file the comparison actually turns on** (§6.1).
+- `Package.c`'s two transmit paths, the header construction, the padding scheme, and the crypto call sites (§4.1, §6.2, §6.7).
+- `TransportHttp.c`'s send path to the wire call, and `TransportSmb.c` in full (§4, §5).
+- `PipeWrite`/`PipeRead` — the byte movers, proven framing-free (§5.1).
+- `AesXCryptBuffer` — the CTR construction, proven symmetric and in-place (§6.3).
+
+**Not covered:** U1–U6. **The largest is U2** — the SMB read header's producer, which lives outside the two files the brief named.
+
+### 7.4 The two answers, stated once
+
+**For msf-diver's D30 Havoc column:**
+
+> **(1) Havoc's dispatch has no `default` branch because it has no `switch`.** Commands dispatch by linear search over a 23-entry function-pointer table terminated by `{ .ID = 0, .Function = NULL }` (`Command.c:16-42`), and an unrecognised `CommandID` falls off the end of that search with no `else`, no error, and **no response**. **"Silently" is literally correct for any deployed agent: the only logging macro on the path expands to `{ ; }` when `DEBUG` is undefined (`Macros.h:57`).** The teamserver cannot distinguish a command that was dropped from one that ran and produced nothing. **Sliver answers `Envelope{ UnknownMessageType: true }`; Havoc answers nothing.**
+
+> **(2) Havoc's framing is carrier-independent in format, carrier-dependent in control flow, and its carrier is chosen at compile time.** `PackageTransmitNow` and `PackageTransmitAll` build the identical 20-byte `[SIZE][Magic][AgentID][CommandID][RequestID]` header, compute the identical `5 × sizeof(UINT32)` padding, and apply the identical AES-CTR — **all above the carrier split and blind to which carrier is built.** `HttpSend` hands `Send->Buffer` verbatim to `WinHttpSendRequest` (`TransportHttp.c:247`); `SmbSend` hands it verbatim to `PipeWrite`. **Neither transport adds a framing byte outbound.** But the packer is not perfectly neutral — `PackageTransmitAll` holds two `#if TRANSPORT_SMB` branches (`Package.c:345, 357`), one enforcing `PIPE_BUFFER_MAX` inside the framing layer. **And the inbound direction is not symmetric at all: `SmbRecv` reads and validates its own 8-byte `[DemonId][PackageSize]` header (`TransportSmb.c:65-117`) that has no counterpart in `Package.c`, while HTTP has no read-side framing — because an SMB pipe has a different process on the other end and no TLS, so the child authenticates its peer.** `TransportSend` selects the carrier with `#ifdef`, so **a built Havoc agent contains exactly one transport.**
+
+**The short version for the comparison table:** *framing shared, read-path not, carrier selection compile-time.*
+
+---
+
+*End of D30 (Havoc half). msf-diver owns D30; this file is Havoc's column and is cited by path.*

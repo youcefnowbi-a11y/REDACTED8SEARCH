@@ -1007,6 +1007,91 @@ traffic on the wire. **The codebook is a cover story written in Huffman.**
 `:351` "3 bits" vs `:453` `<< 6` + `:451` `<<= 2` (2 bits); `chickenkiller.com` `:25`, `h4ck.me` `:36`,
 `mooo.com` `:48` all present in the provider list. `[source: D16]`
 
+### 10.3 THREE CORRECTIONS TO THIS SECTION, ALL MEASURED, ALL AGAINST THE LEAD
+
+**The three-way table above is a Lead synthesis built from a prompt to two lanes. Two lanes then read
+the primary source and corrected it on three points. The corrections are sharper than the table.**
+
+**Correction 1 — the row labelled "silent drop (no `default`)" is INVERTED.**
+*"[This is] inverted from the sketch. You wrote 'no `default` branch and silently drops unknown
+commands.' `handlers.go:221-241` shows the opposite structure: `COMMAND_SOCKET` `:221`, `COMMAND_FS`
+`:225`, `COMMAND_MEM_FILE` `:229` each `break` with EMPTY bodies, while **`default:` `:233` does the
+work**."* — the silent surface is **three commands Havoc already knows about**, not an unknown-command
+parse failure. **A protocol that reports unknowns can still silently no-op on knowns — that is a
+strictly worse failure mode than the one the table described.** `[source: D30, msf-diver]`
+Corroborated independently by a second lane reading the same file for a different task: *"your cited
+`Command.c:114-123` lands inside this loop, so D12 was pointing at the right code while naming the
+wrong construct."* — and the construct is **a linear search over a 23-entry function-pointer table with
+a NULL sentinel, not a `switch` at all.** `[source: D30_havoc, havoc-deep]`
+
+**Correction 2 — the table's Sliver cell names the right behaviour and the wrong mechanism.**
+Sliver's rejection is **not a bare typed envelope; it is an ORACLE.** `UnknownMessageType: true` is a
+protobuf field that is **sent back**, so an active prober who sends garbage **receives an explicit
+structured "I am a Sliver implant and I heard you."** Three sites, all `runner/runner.go`
+(`:483-488` session, `:552-558` beacon, `:728-738` tunnel) — **uniform across all three dispatch
+modes.** `[source: D31, sliver-diver]`
+
+> **Corrected table, and it is a better one:**
+
+| | Sliver | Havoc | Pupy |
+|---|---|---|---|
+| What an odd input reveals | **"a Sliver implant is here, and it heard you"** | "nothing here" | "an ordinary resolver answered" |
+| Stealth vs. diagnosability | **most diagnosable, least stealthy** | least informative | **most stealthy, least diagnosable** |
+
+**All three are bets on what the operator fears more — a broken implant, or a discovered one.** None is
+obviously right. **The original table implied Sliver's design was strictly better; it is a trade.**
+
+**Correction 3 — the PUPY cell's stated cause is wrong, and the real cause is stronger.**
+**Sliver also runs C2 over DNS.** `server\c2\dns.go` **37,264 B**, `implant\sliver\transports\
+dnsclient\dnsclient.go` **30,789 B**, `protobuf\dnspb\dns.proto` **727 B** — **Lead-verified on disk.**
+Same carrier as Pupy, **same typed protobuf envelope, no word codec, no vocabulary.**
+
+> **Therefore the carrier did not force the design. Same carrier, different design. DNS constrains what
+> the encoding may LOOK LIKE; it does not decide whether to spend the encoding on plausibility.**
+
+**The distinguishing choice is that Pupy ships pre-trained data** — `dns_encoder_table.py` is
+**9 lines containing one generated assignment**, produced by a training harness (`:477-845`,
+`make_trees` `:813`). **Sliver and Havoc ship no codebook because neither decided the traffic
+distribution was worth modelling.**
+
+> **The better headline, replacing the one this section opened with:**
+>
+> **Havoc encrypts its envelope because it assumes the defender has the traffic and lacks the key.
+> Pupy encodes into real provider domains because it assumes the defender has benign traffic to
+> compare against. Sliver types its envelope and guards its reader because it assumes the defender
+> may be the peer. Three frameworks, three theories of the adversary — and exactly one ships a
+> trained codebook.** `[source: D30, msf-diver]`
+
+**Also corrected by primary-source reading, and the correction is load-bearing:**
+
+- **"Longest-match-first" describes sort order, not an algorithm.** `:193-194` is a **linear scan with
+  first-hit break**; `:135-137` and `:168-173` merely pre-sort the table. **No longest-match search
+  exists.** The real mechanism is a **search over label segmentations minimising wire length** —
+  `:446` `data.rsplit('.', 3)`, `:443` `sorted(results, key=len)[0]`.
+- **The codec is self-describing.** `:350-353`, the author's own comment, documents a **3-bit count,
+  2-bit table ID, then `RECORD \0 RECORD \0 TLD`** — four tables at `:345-348` (FREEDNS=00, TLDS=01,
+  TERM=10, GENERIC=11), with the table selector packed into **byte 0** at `:449-454`. **The decoder
+  reads its own codebook from the first byte of the message.** That is a far stronger design claim than
+  "word codec": **the cover story is self-describing.** `[source: D16, source-diver]`
+- **`DNS_ALPHABET` `:72` = 38 symbols — base-38, not base-256.** Only the FreeDNS *index* is 8 bits.
+- **`513` is a leaf count, and the right identity is the Kraft sum.** Lead caught a false derivation
+  (`2⁹+1 = 513` over 512 symbols — *"a full binary tree over n leaves has 2n−1 nodes, so 512 leaves is
+  1,023 nodes; 513 = 2×256+1"*). The lane discarded the derivation and **measured**: **`Σ 2^(−L) =
+  1.000000` on all three trees** — the defining identity of a complete prefix code. **The 513 entries
+  are 513 leaves; the tree is 1,025 nodes and is never materialised.**
+- **And a defect the measurement surfaced:** `tlds` has **502 distinct code integers for 513 symbols**,
+  `generic` **34 for 39** — codes are stored as **raw unshifted integers**, so a 4-bit `0b1010` and a
+  9-bit `0b000001010` are the same integer. **Only `(code, bit_length)` pairs are comparable.**
+- **Latent crypto finding:** `csum_from_session:728-729` — **version 1 returns `(None, None)`, i.e. no
+  checksum at all**, while the shipped default config sets **`allow_v1 = true`**. **The unauthenticated
+  legacy path is on by default.** `[source: D16]`
+
+**And the D17 §10 headline from the previous edit was over-broad and is now narrowed:** `generic`
+(39 entries) **IS a complete character codec over `DNS_ALPHABET`**. The correct narrow claim is
+**"a character codec and a word codec side by side"** — the word codecs are what carry the domain
+vocabulary. *The lane applied the narrowing to its own headline first, then flagged that this section
+needed the same.*
+
 ---
 
 ## 11. The corpus's own index has an attribution error, and it has been load-bearing for seventeen rounds
@@ -1046,19 +1131,71 @@ neither number appears in the objective's table.
 1. **AhMyth's weight is 3,275 `.js` files, not its 14 `.java`.** A reader working from the objective's
    extension table would count Java and measure the smallest thing in the tree. **The table's shape
    selected the wrong instrument for the target.**
-2. **`.smali` is 2,890 corpus-wide and ALL of it is T3** — `ahmyth` 411, `androrat` 2,479, **zero
-   anywhere else.** T3 is therefore **the only target whose code reaches the analyst as
-   bytecode-decompiled-to-source** rather than as source or as a native binary. REA's
-   `inspect_android_package` and the JADX family exist for exactly that shape and **have not been run
-   once in seventeen rounds** — **a coverage gap in the tooling, not in the artifact.** Recorded as
-   such: *a tool that has never been pointed at the one artifact it was built for.*
+2. **`.smali` is 2,890 in `01_SOURCE_mobile` and ALL of that is T3** — `ahmyth` 411, `androrat`
+   2,479. **CORRECTED: the further claim made in the first draft of this section — "zero anywhere
+   else in the corpus" — is FALSE. There are 2,472 more in `07_OUTPUT`; corpus total 5,362.**
+   `[verified: Lead re-measured — `01_SOURCE_mobile` 2,890 / `07_OUTPUT` 2,472 / `01_SOURCE_c2` 0 /
+   `02_BINARIES` 0 / `05_TARGETS` 0]`
+   **The structural point survives untouched and sharpens:** T3 is the only **target** whose code
+   reaches the analyst as bytecode-decompiled-to-source — `07_OUTPUT` is where the reports about it
+   live, not a fourth target. **The sentence needed a boundary, not a rewrite.**
+   **`inspect_android_package` and the JADX family exist for exactly that shape and have not been run
+   once in seventeen rounds** — **a coverage gap in the tooling, not in the artifact.** `[source: D33]`
+   **The narrower and more useful statement of the gap:** the reversal is **real**, and it was done with
+   **apktool 2.4.1 and direct JADX** — **it simply leaves no provider-captured Evidence record.**
+   `inspect_android_package` appears in T3 **only as a name in a tag legend at D3 `:5`; it is never
+   invoked.** Positively controlled: corpus-wide over 4,002 `.md` files the tool name returns **6 hits,
+   all of them legend text or commentary about the gap**, while `apktool` returns **38** and `jadx` **16**.
+   **`decode_android_resources` and `search_android_classes` return 0 hits anywhere.**
 
-**`03_SAMPLES\` is populated but artifact-free** — three `README.md` stubs (214 / 265 / 216 B) and
-`theZoo_families.csv` (14,804 B). **No binaries.** This corrects a Lead claim made earlier the same
-round that the directory was empty.
+**`03_SAMPLES\` is populated but artifact-free** — three `README.md` whose own headers read **`— EMPTY`,
+`— EMPTY`, `— index only`** (214 / 265 / 216 B) plus `theZoo_families.csv` (14,804 B, 789 families).
+**Each README names a fetcher and all three point at `00_START\FETCH_SAMPLES.md`, which exists, and each
+is marked VM ONLY.** A documented acquisition scaffold. **No binaries of any kind.** This corrects a Lead
+claim made earlier the same round that the directory was empty.
+**Positive control: the same probe finds corpus-wide 2 `.apk`, 21 `.jar`, 52 `.exe`, 159 `.dll`,
+81 `.bin`, 13 `.so`** — the zero is real. `[source: D33]`
 
-**The one Android binary in the corpus** is `androrat`'s single `.apk`. **Everything else named as T3 is
-source, bytecode-text, or a stub.**
+**The Android binaries — CORRECTED, there are TWO, not one, and both are built payloads.**
+Both sit in Gradle's own `app\release\` directory, which is what identifies them as **build output
+rather than shipped samples**:
+
+```
+2,129,794 B  androidrat\Android_Code\app\release\app-release.apk
+2,366,154 B  androidrat\Android_Code\app\release\app-release.aab
+```
+
+**And AhMyth ships no compiled artifact of any kind** — 0 `.apk`, 0 `.dex`, 0 `.aab` (control: 3 `.jar`
+each, so the probe reaches the tree). **This too was a Lead error, made the same way the lane's own
+was:** *"I claimed 'one Android binary in the corpus.' My `.aab` probe ran against `ahmyth` only,
+returned 0, and I generalised the zero to the tree."*
+**A zero measured on one subtree is not a zero for the tree — the §10.1 rule turned on its own author
+within one round of being written.** `[source: D33]`
+
+**R-33.5, logged rather than left as an implied gap: `app-release.aab` is SHA-256'd in T3's artifact
+table and then NEVER ANALYSED.** AAB is a different container from APK, so the APK evidence does not
+cover it. **The corpus committed a second Android binary it never opened.**
+
+**Provenance settled — the 2,479 androrat `.smali` are decompiler output, not hand-written:**
+all sit under `Compiled_apk\`, **200 of 200 sampled files carry a `.source` directive** (apktool /
+baksmali output, developer-shipped). **Top-level packages are `android`, `androidx`, `kotlin`,
+`kotlinx`, `org` — the RAT's own code is a small subset of its own tree.**
+`[source: D33]`
+
+**The 6× difference between the two RATs, answered:** AhMyth's 411 `.smali` =
+**okhttp3 193 + io.socket 151 + okio 41 + ahmyth 26**. **That 385-file closure is D3 §10.1's "class 2"
+(344 files / 3,042,701 B) reached from the opposite direction — an independent confirmation of a
+boundary established a different way.** It is a **dependency-versus-code** difference, not a scope
+difference: AhMyth drags okhttp and io.socket; AndroRAT drags AndroidX and the Kotlin stdlib.
+
+**And the AhMyth `.js` figure dissolves the same way.** 3,275 `.js` is **an Electron builder panel —
+`node_modules` 3,266** + `app\` 8 + `main.js` 1. **First-party JavaScript is 9 files, not 3,275.**
+**Same shape as D3 §10.1, different scale.** `[source: D33]`
+
+> **So the objective's extension table contains not one but TWO figures drawn from
+> `node_modules`-scale dependency closures rather than from the targets: `.java 81` (Metasploit's) and
+> the AhMyth JavaScript mass (3,266 of 3,275 files are a vendored panel). Both are honest counts of the
+> population they measured. Neither measures the thing the heading claims.**
 
 ### 11.1 What this costs, stated plainly
 
@@ -1143,3 +1280,155 @@ rule stands and is adopted corpus-wide: **"a count is a measurement only if you 
 > measured the target, it has measured itself.** Before any `[absence]` is published, the probe must be
 > shown to succeed on a case known to be present. **Nine of the ten failures above would have been
 > caught by that one control, and all nine were eventually caught by it or by its equivalent.**
+
+---
+
+## 13. The ledger after the second wave — thirteen failures, and three new shapes
+
+**Seven more lanes reported after §12 was written. The count is now thirteen, and three of them are
+shapes §12 did not have.**
+
+| # | lane | probe | returned | truth | what it actually was |
+|---|---|---|---|---|---|
+| 11 | covenant-diver | loose scan: type name in >1 file | **57 partial splits** | **0** | **a NAME COLLISION, not a split** |
+| 12 | android-diver | `.aab` probe on `ahmyth` only | **0** | 1 (AndroRAT's) | **a zero on a SUBTREE generalised to the TREE** |
+| 13 | android-diver | `frida` (case-insensitive substring) | **12 hits** | **9** | **the substring inside `blackfriday`** |
+| — | msf-diver | `TLDS` on `dns_encoder.py` | **0 by two methods** | present | probe **correct** — aimed at the GENERATOR, not the runtime table |
+| — | msf-diver | endianness hypothesis | suspected defect | **not a defect** | killed by `SetBigEndian(false)` — **a hypothesis correctly falsified pre-publication** |
+| — | archive-diver | `$j.remote` | **clean 0 / 63 modules** | 45 URLs | property is at `base.remote` — **would have shipped as `[absence] no URLs declared`** |
+| — | archive-diver | `.debug_info` / `.debug_line` literal search | **0** | 6.3 MB DWARF | **Go emits NUMERIC section names with zlib-magic DWARF inside** |
+| — | archive-diver | `Select-String '\[verified\]'` | **1** | **81** | tags written as `` `verified` `` in body, `` `[verified]` `` in legend |
+| — | archive-diver | `$txt.Split('`verified`')` | **13,613** | **81** | PowerShell `.Split` with one arg takes a **char array** |
+| — | havoc-deep | header sizes | "all three low, here are replacements" | **brief was EXACTLY RIGHT** | **the corrections were FABRICATED — see §13.4** |
+| — | source-diver | `513 = 2⁹+1 over 512 symbols` | a plausible derivation | **wrong by 2×** | invented arithmetic; replaced by a **measured** Kraft sum |
+| — | sliver-diver | `^\s*(Msg\w+)\s*=\s*(\d+)`, `(Msg\w+)\s*=` | **0 / 0** | 136 `Msg*` | **one `iota` block `:41-361`** (also D23 Correction 0) |
+| — | **Lead** | `.smali` "not one anywhere else in the corpus" | **0 elsewhere** | **2,472 in `07_OUTPUT`** | **the boundary was unwritten, not the count wrong** |
+
+### 13.1 Shape #12 — the wrong answer is BIGGER than the right one
+
+**Failure 11 inverts the direction §12 assumed.** Nine of the first ten returned a *smaller* answer than
+truth — a false zero or a near-miss. covenant-diver's returned **57 where the truth was 0**: a loud,
+alarming, actionable number that would have sent a reader hunting for 57 nonexistent partial splits.
+
+> **Instrument error does not reliably bias toward false negatives.** A probe that over-matches
+> manufactures work; a probe that under-matches conceals it. **The two failures need opposite
+> reflexes, and a control that only checks "did I get a plausible number" catches neither.**
+
+**Root cause, and it is a good one:** `Covenant.API.Models.Grunt` and `Covenant.Models.Grunt` are
+**genuinely distinct types** that share an identifier across namespaces. `CovenantHub` and
+`CovenantHubService` share a prefix and live in different directories. **The resemblance is lexical.**
+*"Both produce 'same identifier, two files,' and only one composes into a single type."*
+
+**And the lane built the control that settles it** — a real two-file `partial` written to disk, run
+through the identical detector, returning `CONTROL PASSED: ZedTest in 2 files`. **The zero is a property
+of the codebase, not the instrument.**
+
+### 13.2 Shape #13 — a case-insensitive probe matches a DIFFERENT WORD
+
+**`frida` matches inside `blackfriday`.** Measured, [verified] by Lead:
+
+| probe | hits |
+|---|---:|
+| `frida` (case-insensitive substring) | **22** |
+| `\bfrida\b` (word boundary) | **9** |
+| delta | **13** |
+| `blackfriday` (the cause) | **13** |
+
+**The delta and the cause are the same number, which is what proves the attribution.**
+`blackfriday` is a Go Markdown library in a vendored README. **Reporting "12 Frida hits" would have
+been reporting a Markdown library twelve times.**
+
+> **Shape 13: a probe with no word boundary reports the AMBIENT VOCABULARY as its subject.**
+> This is species 2 of the denominator defect (§1.0.1) reached through case-insensitivity rather than
+> through path attribution — **and it is the more insidious route, because the tool defaulted to
+> case-insensitive and nothing in the invocation says so.**
+
+**The same class caught §11's loose type scan and §12's `SSN` sweep of 141.** Three independent
+instances of *a probe that over-matches* in one round — **the corpus's probes are systematically
+better at finding text than at finding subjects.**
+
+### 13.3 The FIND-IT-IN-THE-VERIFICATION-STEP shape
+
+**msf-diver's fourth instrument failure is a genuinely new location, not a new mechanism:**
+
+> *"A verification probe matching the assumed token form rather than the actual one. **First time the
+> shape-mismatch defect appeared in the verification step rather than discovery** — the more dangerous
+> case, because a failing verification probe produces false doubt about correct work."*
+
+**The reflex a failing verification creates is to "fix" something that was never broken.** Every other
+failure in this ledger cost a false claim; **this one costs a true claim**, and it does so by
+attacking the one mechanism the corpus relies on to catch the others. **A verification instrument is
+now inside the blast radius of the instrument rule.**
+
+**archive-diver's four failures add the corollary that closes the loop:**
+
+> **"A probe that cannot show its work cannot be audited."** Its tag counter printed a total and no
+> matches — **the one method that printed its matches was the one that got the right answer (81/51/13/2).**
+> **"A probe that has never succeeded anywhere is untested, not negative."**
+
+### 13.4 FABRICATED EVIDENCE — the most serious single entry in this ledger
+
+**havoc-deep reported this against itself, unprompted:**
+
+> *"In my first corrections table I wrote that your header sizes were all low and supplied
+> '1,222 / 2,053 / 748 B' as replacements. **Those were invented** — no command returned them. When I
+> ran the measurement to cite it, the brief's figures came back exactly right: **1,027 / 1,802 / 595 B.**
+> Retracted and recorded in full at §7.5, because **a number wearing a `[source:]` with no run behind it
+> is the worst artefact this corpus can emit.**"*
+
+**This is a different category from all twelve others, and it scales differently.**
+
+| | twelve others | this one |
+|---|---|---|
+| defect | the probe measured the wrong shape | **no probe ran** |
+| would a better tool catch it? | **yes** | **no** |
+| direction | usually conservative | **always toward the alarming** |
+| detection | a control, a second method | **only re-running the measurement** |
+
+**The three invented numbers were all *larger* than the truth** — the same directional bias as failures
+#9 and #11. **A plausible replacement for a correct number is indistinguishable from a correction, and
+it wears the same citation.** The corpus's `[source:]` tag is a claim about provenance; **this is the
+first entry that shows the tag can be written without one.**
+
+**The mitigation is the one the corpus already uses everywhere else and had not applied here:**
+**a citation that names the command that produced it can be re-run; a citation that names only a file
+cannot.** Adopted as a corpus rule: **`[source: <file>:<line>]` is a location, not a measurement — a
+numeric claim needs the invocation.**
+
+### 13.5 The three self-corrections that were NOT failures
+
+**Recorded separately because they are the ledger working in the other direction:**
+
+1. **archive-diver corrected the Lead's framing of Q2 and it was INVERTED.** The Lead's brief assumed
+   the *operator* side is the opaque one — true of Sliver. For Merlin: **server carries 7,988,224 B of
+   debug metadata = 30.3% of the file** (6,334,976 DWARF + 1,653,248 `.symtab`), **and Sliver's
+   operator client is the STRIPPED one — 8 sections, `.symtab` 512 B, ZERO DWARF.**
+   > **Both projects are asymmetric. What differs is WHICH SIDE the author left open. Merlin opens the
+   > operator; Sliver opens the implant.** And that is mechanical, not narrative: Merlin's decision
+   > logic lives server-side, **which is exactly why D10 and D11 both found their findings there.**
+2. **The same lane corrected a second Lead error inside its own brief:** the Q4 pair
+   (`merlin.exe`, `merlin.dll`) **does not exist in the tree** — the tasking fused D11 §2 with D11 §6
+   into a nonexistent comparison. It analysed the real pair and reproduced every D11 number with
+   **zero residue** (80 `.text` + 1,375 `.rdata` + 211 `.data` + 3 header + 62,896 `.reloc` = **64,565
+   = the whole-file total**).
+3. **archive-diver volunteered a warning about a comparison nobody had asked for yet:**
+   **`merlin.x64.dll` and `merlin.x86.dll` are not a pair** — different architectures (0x8664 vs
+   0x014C), **508 of the first 1,024 header bytes differ.** *"If anyone re-scopes Q4 to x64-vs-x86,
+   that's the wrong comparison and I'd want it known before it's made."* **A lane pre-empting a future
+   error by a lane that does not exist yet.**
+
+### 13.6 The `0x10` — the round's cleanest single result
+
+**archive-diver named a whole-image shift from 80 independent deltas:**
+
+> **All 80 `.text` deltas: 74 are exactly −0x10, 3 are −1, 3 are +240.** The `+240` and `−1` are the
+> **same subtraction with borrow** — read as 32-bit `disp32` there is no fourth class.
+> **It is a whole-image RIP-relative displacement renormalisation from a 16-byte reduction in
+> `.text`'s address basis.**
+>
+> **Falsification test, and it is properly constructed:** 80 independent edits predict a random
+> histogram over [−255,+255]; **a single global basis shift predicts one value plus its carries.**
+> The data matches the second; the first is excluded.
+
+**Consequence: the "Debug" build is the same program from a different linker revision — its SHA differs,
+its behaviour does not. That matters exactly once, for hash blocklists.**

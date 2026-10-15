@@ -17,9 +17,10 @@
 - [§5 Carrier economics — A vs AAAA, and the 255-byte ceiling](#5-carrier-economics--a-vs-aaaa-and-the-255-byte-ceiling)
 - [§6 Latent defects — marked latent, not live](#6-latent-defects--marked-latent-not-live)
 - [§7 The Parcel framing layer — and D6 §13's read boundary](#7-the-parcel-framing-layer--and-d6-13s-read-boundary)
-- [§8 Boundudes and scope](#8-boundaries-and-scope)
+- [§8 Boundaries and scope](#8-boundaries-and-scope)
 - [§9 Residual unknowns](#9-residual-unknowns)
 - [§10 Instrument record](#10-instrument-record)
+- [§11 The `idna()[:-1]` question, resolved](#11-the-idna1-question-resolved)
 
 ---
 
@@ -674,7 +675,7 @@ Every absence claim in this report carries a control shown able to succeed with 
 - **`FREEDNS` conformance to `DNS_ALPHABET`** (§3.1) — the same character-set test returned **0 violations across 256 entries**; the control is that the test was run against the alphabet set itself and correctly reports membership, rather than the empty set trivially satisfying a `<=` test. Explicitly: **an absence of violations is only meaningful because the alphabet was non-empty (38 chars) and every entry was non-empty.**
 - **The three-tree bit-length distributions** (§1.2) — computed by the same code path that produced the `cdns`/`freedns` single-entry results, so the counter was shown discriminating between a 1-entry tree and a 513-entry tree.
 
-### §10.5 `[near-miss]` — self-caught: a true number with an invented derivation
+### §10.4 `[near-miss]` — self-caught: a true number with an invented derivation
 
 **The worst error class this corpus produces, caught in this lane before publication.**
 
@@ -699,7 +700,7 @@ So the draft attached a correct measurement to a **derivation that had been reve
 
 **The recovery instrument was enumerating and measuring rather than reasoning about the count.** The Kraft sum is not derivable from the entry count; it was computed per-entry from the stored bit lengths and returned exactly 1.0 on all three trees, which independently confirms the tables are complete prefix codes. **That measurement replaces the rejected derivation entirely.**
 
-### §10.6 `[near-miss]` — self-caught: over-broad framing of the compression model
+### §10.5 `[near-miss]` — self-caught: over-broad framing of the compression model
 
 An early draft's §0 headline read *"the compression model is word-level, not character-level."*
 
@@ -709,7 +710,7 @@ An early draft's §0 headline read *"the compression model is word-level, not ch
 
 **Recorded because the over-broad version was the more persuasive sentence and the narrower one is the correct one.** The error was not in the measurement (`startswith(term)` and the symbol lengths were read correctly) but in generalising a finding about two trees into a claim about the file.
 
-### §10.7 What was *not* an instrument error
+### §10.6 What was *not* an instrument error
 
 - **The `chr(0)` / `IS_END` aliasing** (§3.3) was investigated as a possible bug and **found not to be one**. It is recorded as a resolved question, not an error.
 - **The `idna()[:-1]` question** (§4.2) was raised by the Lead as a possible framing defect and **resolved to a DNS trailing-dot artifact**, established from the encoder side (`:798` emits pure hex, no dot). Recorded as resolved.
@@ -718,3 +719,44 @@ An early draft's §0 headline read *"the compression model is word-level, not ch
 
 *Lane: `source-diver` · task-28 · all claims `[source]` unless tagged `[inferred]` · no provider bound, no execution, no binary evidence*
 *This report is the control comparison for D6 §13 and does not re-derive the Parcel framing (§7).*
+
+---
+
+## §11 The `idna()[:-1]` question, resolved
+
+**Question (raised by the Lead, verified here):** `_resolve:1402` does `qname.stripSuffix(self.domain).idna()[:-1]`. **Which byte does the `[:-1]` drop, and does the encoder put it there?**
+
+**Answer: it drops a trailing dot — a DNS name-form artifact from `dnslib`'s label handling. The encoder does not put it there.** It is **not** a payload terminator, and the encoder does **not** cooperate to make it work.
+
+### §11.1 The evidence, from the encoder side
+
+The `[:-1]` operates on the **qname**, and the qname's trailing dot comes from the **DNS label form**, not from the payload. Two independent observations establish that the payload never contains a trailing dot:
+
+1. **The payload is not text that could carry a dot.** `_aaaa_page_encoder:798-800` builds each address as:
+
+```python
+addr = ':'.join([packed[i:i+2].encode('hex')
+                 for i in xrange(0, len(packed), 2)])
+```
+
+`packed[i:i+2].encode('hex')` produces **two lowercase hex characters per byte**. The result is a colon-joined hex string — **no dot is ever emitted by this path.** The dots a reader sees in a DNS response are the **IPv6 address separators** that `dnslib`/`netaddr` reintroduce when rendering the answer as an `AAAA` `rdata`, and the dots in a *query* name are the DNS label separators.
+
+2. **The A path is the same.** `_a_page_encoder:758-767` produces four decimal octets via `struct.unpack('!BBBB', ...)` — again no dot in the emitted data, only the separator that joins them.
+
+So the payload has **no trailing dot to strip**, and `[:-1]` cannot be removing a payload byte.
+
+### §11.2 What `[:-1]` actually removes
+
+`qname` is a `dnslib` `DNSLabel`. `stripSuffix(self.domain)` returns the label with the C2 domain removed, leaving the **encoded subdomain labels**, rendered in the FQDN label form that carries a **trailing dot** (the root label). `.idna()` re-normalises the label through IDNA/punycode and preserves that trailing root dot. **`[:-1]` removes it**, yielding the bare encoded string that `self.process(qtype, ...)` expects.
+
+**Therefore the operation is `label-form → wire-form` normalisation of a DNS name, and it is unconditional because the trailing dot is unconditional in the input** — not because the encoder agreed to append one.
+
+### §11.3 What this means for the framing
+
+**The boundary between records is carried by an explicit 1-byte length field (`:739`, `:783`), not by a delimiter.** §5.3 establishes that field and its 255-byte ceiling. The `[:-1]` is not part of the framing contract at all — it is a string-normalisation step on a DNS name that happens to be one byte shorter as a result.
+
+**The distinction matters operationally.** If `[:-1]` were stripping a payload terminator, the decoder would be **unconditionally discarding the last byte of every payload**, which would be a framing assumption that holds only because the encoder cooperates — and it would break silently the moment the encoder stopped appending it. **It is not that.** The decoder is not discarding payload; it is removing a DNS structural character that the DNS layer added.
+
+### §11.4 Residual
+
+**One thing remains unverified and is not claimed:** that `dnslib`'s `.idna()` on a `stripSuffix` result *always* yields a trailing dot, for **every** input shape — including a qname that is exactly the C2 domain, or one with a single encoded label. §11.2's mechanism is read from the `dnslib` API contract and the types in use (`DNSLabel`, `stripSuffix`, `idna`), **not** from an executed call. With no execution in this lane, the case where `stripSuffix` returns an empty or single-label remainder is **untested**. If the trailing dot were ever absent, `[:-1]` would silently eat one character of payload — a genuine latent hazard in the *other* direction from the one §11.3 rules out. Carried to §9's family of unresolved runtime behaviours. `[inferred]`
