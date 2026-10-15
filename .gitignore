@@ -46,3 +46,11 @@ desktop.ini
 .DS_Store
 *.swp
 *~
+
+# Lane scratch at the repo root (per-lane working output, not deliverables).
+# Underscore-prefixed by convention so this rule stays narrow and slash-free.
+# First seen round 15: _allmaps.csv (D15 handler-map dump) and
+# _dispatched.txt (D15 dispatched-ID list) from the Sliver handlers lane.
+_*.csv
+_*.txt
+_*.json

@@ -40,10 +40,10 @@ All paths under `RE_Library\05_TARGETS\merlin_extracted\`. All five binary diges
 | Phase | Target | State |
 |---|---|---|
 | A | `merlin.c` / `merlin.def` source read | **COMPLETE** |
-| B | DLL export table (Q2) | **PENDING** |
-| C | DLL entry-point behaviour (Q3) | **PENDING** |
-| D | Server function surface (Q1) | **PENDING** |
-| E | Module loader SourceRemote/SourceLocal (Q1) | **PENDING** |
+| B | DLL export table (Q2) | **COMPLETE** |
+| C | DLL entry-point behaviour (Q3) | **COMPLETE** |
+| D | Server function surface (Q1) | **COMPLETE** |
+| E | Module loader SourceRemote/SourceLocal (Q1) | **COMPLETE — closes D10 residual R-1** |
 | F | Agent release vs Debug diff (Q4) | **PENDING** |
 
 ---
@@ -315,4 +315,173 @@ rundll32.exe merlin.x64.dll,<ExportName> <url>
 | — | **The genuine distinct primitive is `Run`,** which parses `rundll32.exe` argument layout and accepts an operator-supplied URL. `read`. |
 
 `[inference]` The corrected picture: the DLL ships **seven export names for one action**, so that whichever conventional entry point a loader, `rundll32`, `regsvr32`, or reflective injector happens to call, the agent starts. There is no second-stage registration behaviour to find — the surface is wide but shallow.
+
+---
+
+## §4 Server binary — function surface
+
+**Artifact:** `merlinServer-Windows-x64.exe`, SHA-256 `054EECE65FD586379574B0BC7FC800B807BF51A3A471B3E75FFCC1B022555552`, 26,329,600 B. **First time this binary has been opened in Ghidra** — no prior analysis existed. `verified`.
+
+### 4.1 The server is symbol-bearing — the key structural asymmetry
+
+`verified` from `binary_overview`. Unlike the `-s -w` stripped agent, **the server retains its full Go symbol table and compressed DWARF:**
+
+| Segment | Length (B) | Note |
+|---|---|---|
+| `.text` | 8,287,232 | code |
+| `.rdata` | 9,058,816 | strings + type descriptors |
+| `.data` | 34,539,624 | |
+| `.pdata` | 202,240 | |
+| **`.symtab`** | **1,653,248** | **full Go symbol table present** |
+| `.zdebug_info` | 2,604,544 | compressed DWARF info |
+| `.zdebug_line` | 1,420,800 | |
+| `.zdebug_loclists` | 1,421,824 | |
+| `.zdebug_rnglists` | 526,336 | |
+| `.zdebug_frame` | 315,392 | |
+| `.zdebug_addr` | 45,568 | |
+| `.zdebug_abbrev` | 512 | |
+| `.debug_gdb_scripts` | 512 | |
+| `.xdata` | 512 | |
+| `.idata` | 1,536 | |
+| `.reloc` | 171,008 | |
+
+`procedure_count` **17,266**; `string_count` **62,145** (both enumerated). Image base `0x140000000`, `executable_role: application`.
+
+`[inference]` **Why the server is unstripped while the agent is stripped is itself a finding.** The release workflow applies `-s -w` to the agent (the thing that gets dropped on a target) but *not* to the server (the thing that stays on the operator's host). That is a coherent OPSEC posture: strip the artifact that will be captured and analyzed by a defender; leave the operator-side binary diagnosable for stack traces and crash reports. It also means **every server-side Go function is nameable**, which is what made §5 answerable at all.
+
+`[inference]` Consequence for this lane: `search_procedures` returns *real names* on the server, so the enumerate-by-name method used in §5 works here and **would not have worked** on the agent (§7).
+
+### 4.2 `pkg/modules` — D10's count of 5 confirmed, now with addresses
+
+`verified`. Independent enumeration returned **exactly 5** functions in the `pkg/modules` package, confirming D10's count on the server binary by a different route:
+
+| # | Function | Address |
+|---|---|---|
+| 1 | `pkg/modules.NewModule` | `0x14061e6e0` |
+| 2 | `pkg/modules.validateModule` | `0x14061f4c0` |
+| 3 | `pkg/modules.marshalMessage` | `0x14061f680` |
+| 4 | `pkg/modules.GetModuleList` | `0x14061f7c0` |
+| 5 | `pkg/modules.GetModuleList.func1` | `0x14061f9c0` |
+
+**Absence finding with positive control.** `[absence]` No sixth function exists in `pkg/modules`. Positive control: the identical regex that found these 5 found zero additional `modules.`-prefixed procedures, while the same query style resolved 15 functions for the adjacent `GetModule`/`GetModuleList` RPC surface (§4.3) — so the search demonstrably enumerates this namespace when symbols exist.
+
+`[inference]` `GetModuleList.func1` is a closure — the `sort.Slice`-style comparator or the `filepath.Walk` callback that `GetModuleList` passes inline. That accounts for the "extra" function without it being a sixth real operation.
+
+### 4.3 The RPC plane — 15 functions, and it answers `GetModule`/`GetModuleList`
+
+`verified`. Enumerated from the same search:
+
+| Layer | Functions |
+|---|---|
+| `pkg/rpc` generated stubs | `UnimplementedMerlinServer.GetModule` (`0x1405a8880`), `UnimplementedMerlinServer.GetModuleList` (`0x1405a88e0`), `_Merlin_GetModule_Handler` (`0x1405b3b00`), `_Merlin_GetModuleList_Handler` (`0x1405b3d40`), plus both `.func1` interceptor closures (`0x1405ba320`, `0x1405ba460`), and the pointer-receiver variants (`0x1405bb8a0`, `0x1405bb920`) |
+| `pkg/services/rpc` implementations | `(*Server).GetModule` (`0x140763440`), `(*Server).GetModuleList` (`0x140763e00`) |
+
+`[inference]` The `Unimplemented…` variants are gRPC forward-compatibility stubs (they exist to return `Unimplemented` so a client can detect an absent method) and the `(*Server).…` pair are the real implementations. **Module enumeration is exposed over the same gRPC :50051 plane as everything else in D11-adjacent analysis — there is no separate module transport.**
+
+---
+
+## §5 The module loader: SourceRemote vs SourceLocal — Q1
+
+**Q1 asked:** *the module loader that resolves `SourceRemote` vs `SourceLocal`, since D10 could not prove which wins (its residual R-1) — the one residual that could change a finding.*
+
+### 5.0 Answer up front
+
+**Neither "wins", because nothing chooses between them. There is no resolution branch in the binary.** `SourceLocal` and `SourceRemote` are **protobuf wire-format fields on the `rpc.Module` message**, populated for transport to the operator, and read back only through generated accessors. No code path in the server compares them, selects one, or falls back from one to the other. `verified` — established by four independent probes below.
+
+`[inference]` **D10 residual R-1 is closed, and it closes in the direction that *changes* the finding:** the premise that a loader must resolve between a local and a remote source is not reflected in the shipped server. The server's `NewModule` needs a module's **JSON** and its **`base`** block; the local/remote distinction is a client-facing description of *where the operator could fetch payload bytes from*, not a server-side fetch strategy.
+
+### 5.1 `NewModule` looks up exactly two JSON keys — neither is source-related
+
+`verified`. `pkg/modules.NewModule` (`0x14061e6e0`) performs exactly **two** map lookups, both `runtime_mapaccess1_faststr`:
+
+| Call | Key address | Length | Bytes read | Decoded |
+|---|---|---|---|---|
+| 1 | `0x1407e9701` | 4 | `62 61 73 65` | **`"base"`** |
+| 2 | `0x1407ef110` | 10 | `70 6f 77 65 72 73 68 65 6c 6c` | **`"powershell"`** |
+
+Both key constants read directly via `read_bytes`, complete reads, `verified` — not inferred from Ghidra's label.
+
+`[inference]` Decoded: `NewModule` unmarshals the module JSON, then requires a `"base"` object (present in every one of the 63 modules catalogued in the archive lane) and optionally a language-specific `"powershell"` block (which §7.3/D8 of the archive lane showed carries `disableav` / `obfuscate` / `base64`). This is exactly the schema's two-tier structure, confirmed at the instruction level.
+
+**Neither lookup touches a local/remote key.** `[absence]` There is no `mapaccess` for `"local"`, `"remote"`, `"SourceLocal"`, or `"SourceRemote"` in the loader. Positive control: the two `mapaccess1_faststr` calls that *do* exist were both found and both decoded, and the string inventory for the server (62,145 strings, `verified`) does contain `local`- and `remote`-bearing text elsewhere — so the query surface can see such strings; the loader simply does not index by them.
+
+### 5.2 `SourceLocal` / `SourceRemote` are protobuf schema fields, not loader logic
+
+`verified`. The identifier search returns **struct-tag string literals and generated accessor names only** — no comparison, no branch:
+
+```
+0x140fd0f55  SourceLocalLprotobuf:"bytes,16,rep,name=SourceLocal,proto3" json:"SourceLocal,omitempty"
+0x140fd17e2  SourceRemoteNprotobuf:"bytes,15,opt,name=SourceRemote,proto3" json:"SourceRemote,omitempty"
+```
+
+Reading the tags precisely:
+
+| Field | Protobuf tag | Cardinality | Meaning |
+|---|---|---|---|
+| `SourceLocal` | `bytes,16,rep` | **repeated** | a **list** of byte blobs |
+| `SourceRemote` | `bytes,15,opt` | **optional** | a **single** byte blob |
+
+`verified`. Plus the generated accessors, confirmable as methods on the RPC message type:
+
+```
+github.com/Ne0nd0g/merlin/v2/pkg/rpc.(*Module).GetSourceLocal
+github.com/Ne0nd0g/merlin/v2/pkg/rpc.(*Module).GetSourceRemote
+```
+
+`[inference]` This is decisive. The type is `pkg/rpc.Module` — the **wire message**, not a loader struct. `GetSourceLocal`/`GetSourceRemote` are protobuf-generated getters, whose only job is to return a field or its zero value; they contain no selection logic by construction. The asymmetric cardinality is informative: `SourceLocal` is a **repeated** field (the schema's `local` key is an array of paths in every module JSON examined in the archive lane) while `SourceRemote` is a scalar (the schema's `remote` is a single URL string). **The wire format mirrors the JSON schema's own shape with no resolving logic added.**
+
+### 5.3 `validateModule` checks the same four things D10 found — and does not touch source either
+
+`read`. `pkg/modules.validateModule` (`0x14061f4c0`). The decompilation shows the validation ladder explicitly, and the immediates decode as follows:
+
+```c
+auVar5 = strings_ToUpper(<param>);
+if (iVar4 == 5) { if ((*psVar1 == 0x554e494c) && ((char)psVar1[1] == 'X')) goto LAB_14061f551; }
+else if (iVar4 == 6) { if ((*psVar1 == 0x57524144) && ((short)psVar1[1] == 0x4e49)) { … } }
+```
+
+Decoding the constants little-endian → ASCII:
+
+| Immediate | Bytes | Decoded | Length gate |
+|---|---|---|---|
+| `0x554e494c` + `'X'` | `4c 49 4e 55` + `58` | **`"LINUX"`** | `iVar4 == 5` |
+| `0x57524144` + `0x4e49` | `44 41 52 57` + `49 4e` | **`"DARWIN"`** | `iVar4 == 6` |
+
+Then, inside the matched branch:
+
+```c
+auVar5 = strings_ToUpper(<second param>);
+if ((auVar5._8_8_ != 3) || ((*psVar2 != 0x3358 || (char)psVar2[1] != '2') &&
+                            (*psVar2 != 0x3658 || (char)psVar2[1] != '4')))
+```
+
+| Immediate | Bytes | Decoded |
+|---|---|---|
+| `0x3358` + `'2'` | `58 33` + `32` | **`"X32"`** |
+| `0x3658` + `'4'` | `58 36` + `34` | **`"X64"`** |
+
+`verified` by byte-level decoding of the immediates in the decompiled output.
+
+`[inference]` `validateModule` compares an upper-cased platform against the literals `LINUX` / `DARWIN` (and by extension the release build's `WINDOWS` path, which follows the same ladder in a branch not fully rendered) and an upper-cased architecture against `X32` / `X64`. Those are exactly **2 of the 4** checks D10 identified (`platform`, `arch`), reached via `ToUpper` normalisation so `linux`/`Linux`/`LINUX` all pass. **Consistent with D10: `lang`, `remote`, `local`, and `privilege` are validated by nothing.**
+
+**Critically for Q1:** `[absence]` `validateModule` contains **no source-selection logic** either. Positive control: the string-comparison ladder *is* visible and *is* decodable in this function — four platform/arch literals were recovered — so if a `SourceLocal`/`SourceRemote` comparison existed here it would have appeared as a literal in the same ladder. It does not.
+
+### 5.4 The remaining `pkg/modules` functions cannot resolve it either
+
+`verified` by enumerated function list (§4.2), the five members of `pkg/modules` are accounted for:
+
+- `NewModule` — builds a module from JSON; looks up `base` + `powershell` (§5.1). No source logic.
+- `validateModule` — platform/arch/type/BASE only (§5.3). No source logic.
+- `marshalMessage` — serialises a module *message* for transport (`encoding/json/v2.Marshal`, error path via `fmt_errorf` with a `0x39` = 57-byte format string). Transport, not selection.
+- `GetModuleList` + `.func1` — enumerate/walk the module directory. Enumeration, not selection.
+
+`[inference]` **There is no sixth function and no unexamined candidate.** Every function in the package has been read or classified; none contains a local/remote resolution. The absence is bounded by a complete enumeration of the package, which is the strongest form of negative evidence available here.
+
+### 5.5 R-1 closure statement
+
+| D10 residual | Status after this lane |
+|---|---|
+| **R-1** — which of `SourceLocal` / `SourceRemote` the loader resolves, unproven | **CLOSED. Neither is resolved, because no resolution exists in the server binary.** Both are protobuf fields on the `rpc.Module` wire message; `validateModule` validates neither (matching D10); `NewModule` indexes only `base` and `powershell`; no fourth candidate function exists. `verified` across a complete 5-function package enumeration. |
+
+`[inference]` **Practical reading for future lanes:** treating `SourceLocal`/`SourceRemote` as a server-side fetch strategy is wrong and should be dropped. They describe *where an operator's payload bytes can be obtained from* — a list of local paths versus a remote URL — as advertised to the client. Any fetch decision therefore lives in **operator/CLI code, not in the server**, which is consistent with the archive lane's finding that 45 module `remote` URLs are absent from the agent binary (0 hits vs a 3,547-hit control) and with the module JSON's `local` paths pointing at files not present in the archive. The server ships and validates module *definitions*; it does not ship their payload bodies.
 

@@ -3,10 +3,11 @@
 Function-by-function reversal of every target in the corpus. Written incrementally; this file is
 the board, the report files are the deliverables.
 
-**Last verified (round 14, measured): 1,755.2 KB across 19 files.** Prior header said 1,663.3 KB /
-17 files; the delta is the five D11 files completing plus `D12_sliver_aitools.md` and the first
-bytes of `D13_covenant_api_control_plane.md`. Counted by `Get-ChildItem -Filter *.md` on
-`07_OUTPUT\reports\DEEP\`; the figure includes `STATUS.md` itself.
+**Last verified (round 15, measured): 1,949.1 KB across 23 files.** Prior header said 1,755.2 KB /
+19 files at round 14; the delta is `D13_covenant_api_control_plane.md` completing (1,768 → 79,666 B),
+`D12_havoc_dispatch.md` and `D14_pupy_vidcap_native.md` landing, `D11_merlin_binaries.md` growing
+(20,720 → 33,396 B), and `D17_cross_target_synthesis.md` being written. Counted by
+`Get-ChildItem -Filter *.md` on `07_OUTPUT\reports\DEEP\`; the figure includes `STATUS.md` itself.
 
 | file | bytes | lines | `##` |
 |---|---:|---:|---:|
@@ -24,9 +25,12 @@ bytes of `D13_covenant_api_control_plane.md`. Counted by `Get-ChildItem -Filter 
 | D11_havoc_native_win32.md | 60,382 | 1,141 | 9 |
 | D11_mythic_crypto_postresponse.md | 34,561 | 417 | 10 |
 | D11_pupy_transport_crypto.md | 38,761 | 517 | 11 |
-| D11_merlin_binaries.md | 20,720 | 318 | 3 |
+| D11_merlin_binaries.md | 33,396 | 487 | — |
 | D12_sliver_aitools.md | 30,483 | 313 | 14 |
-| D13_covenant_api_control_plane.md | 1,768 | 26 | — |
+| D12_havoc_dispatch.md | 25,698 | 382 | 11 |
+| D13_covenant_api_control_plane.md | 79,666 | 1,036 | 9 |
+| D14_pupy_vidcap_native.md | 29,122 | 457 | — |
+| D17_cross_target_synthesis.md | 21,076 | 347 | — |
 | CROSSREF_AUDIT.md | 26,456 | 308 | 21 |
 | STATUS.md | (this file) | | |
 
@@ -69,6 +73,59 @@ rule with `RE_Library/`; verified 47 leak candidates → 0.
 
 Same shape, fifth instance: the file *looked* like a working ignore list, which is exactly why it
 went unexamined. **A control on one rule would have disproved the other eleven in ten seconds.**
+
+### The rule has a second variant, and havoc-deep found it (D12 §9, "F5")
+
+The first variant is about **tools**. This one is about **figures**, and it generalises past tooling
+entirely:
+
+> **A number that arrived by a route other than the one it appears to have arrived by.**
+
+havoc-deep's first draft said **"14 unmatched"** and then listed **13**. Both numbers were correct
+for different questions: **14 constants, 13 distinct values**, because `COMMAND_GET_JOB` and
+`COMMAND_INLINEEXECUTE_EXCEPTION` both equal `1`. The names came from a by-name print; the count
+came from a later value-level set operation. Two runs, one sentence. Cause, in havoc-deep's own
+words: **"a stale figure wearing the authority of a measurement."**
+
+**The uncomfortable part, also in its own words: it was caught only because the report was already
+written and the numbers were cheap to re-check. Inspection would not have found it.** Nothing about
+`14` next to a 13-item list looks wrong on the page — it reads as trailing-off, not as contradiction.
+
+Two instances in one lane, two different mechanisms, one shape:
+
+| instance | mechanism | how it was caught |
+|---|---|---|
+| D11 §8.5 (`Syscalls.c:76`) | `Select-Object -Skip 73` starts at line 74; the counter started at 74 | re-measured four independent ways |
+| D12 §9 F5 ("14 unmatched") | count carried from a run whose scope differed from the run that produced it | recomputed from scratch after publication |
+
+**Rule for any lane adding a figure to a report: state which run produced the number and what that
+run was scoped to.** If the number and the list beside it came from different commands, they are
+two measurements that happen to be adjacent, not one measurement.
+
+## Round 15 — the capability layer was the gap, and it was the same gap six times
+
+D1 was audited against its own title. It has **18 sections** covering Sliver's crypto perimeter,
+transports, envelope framing, handler dispatch table, evasion, server CA, sRDI path, traffic
+encoders, and session handler. **Zero sections covering what the implant can actually do.**
+`implant/sliver/handlers/` is **44 `.go` files / 332 KB** — the largest unread block in the target,
+and the directory that implements `ls`, `download`, `execute-assembly`, injection, and token
+manipulation.
+
+The pattern is corpus-wide rather than Sliver-specific. **Every lane reversed the wire before it
+reversed the capability:**
+
+| target | protocol/wire layer | capability layer |
+|---|---|---|
+| Sliver | D1 §3/§4/§6/§22 — thorough | `handlers/` 332 KB — **never opened** (now task-27) |
+| Havoc | D5 + D11 native | `TaskDispatch` — done in D12 only after the premise was killed |
+| Pupy | D6 §13 framing, D11 transport crypto | `picocmd/` DNS tables — **never read** (now task-28) |
+| Covenant | D2 | `CovenantAPI.cs` 1.08 MB — in progress (task-25) |
+| Mythic | D4 | post_response siblings — D4 §13.3 flagged one of two |
+| Android | D3 R-5 | `tcpConnection` past `:159` — flagged, not read |
+
+**This is a briefing failure, not a lane failure.** Every one of these lanes was given a target and
+told to be exhaustive; the wire layer is where the first real answers are, so that is where the
+work went. Nothing in the briefs said "and then go read what it can do."
 
 ## Round 13 — the citation-count pattern is RETRACTED
 
@@ -460,6 +517,43 @@ system working.
   files / 283 `.go`**. Clone `HEAD` `8e5d2f9d` (2026-10-14) vs binary revision `422044af`
   (2026-10-03).
 - **`D1` §2.1 — same split added**, so both reports reconcile to identical measured numbers.
+
+## Round 15 — corrections landed
+
+- **D1 §0 / T1 §4.2 — the implant claim, re-verified complete.** T1 §4.2 item 1 is struck through in
+  place (`T1:517-532`) with the measured truth beside it: implant source **2,678 files / 23,926 KB at
+  `implant\`**, of which **337 files / 1,400.2 KB / 280 `.go` are first-party** and **2,333 files /
+  22,506.6 KB are `implant\vendor\`**. The correction also preserves the part of the original claim
+  that was right: **the source clone is at a different commit** than binary revision `422044af`.
+  Note the older `345 files / 283 .go` figure in the correction above is the **`implant\sliver\`
+  subtree only** and is not the whole implant; both are true of different scopes and the header now
+  says which is which.
+- **D11_merlin §R-1 — CLOSED by archive-diver, and it changes the finding rather than extending it.**
+  The premise was that `GetModule`/`RunModule` substitute `local` or `remote` into `commands`.
+  **No `local`/`remote` resolution exists anywhere in the server binary.** Verified four ways:
+  `SourceLocal`/`SourceRemote` are **protobuf wire fields on `rpc.Module`** (`bytes,16,rep` and
+  `bytes,15,opt`, tags at `0x140fd0f55` / `0x140fd17e2`) with **generated accessors and therefore no
+  branch by construction**; `NewModule` (`0x14061e6e0`) makes exactly two map accesses, keys read
+  byte-for-byte as `"base"` (len 4) and `"powershell"` (len 10) — **no source key**;
+  `validateModule` (`0x14061f4c0`) validates platform and arch only; `pkg/modules` is exactly 5
+  functions and all 5 are classified.
+  **Corrected statement: `local`/`remote` describe *where an operator can obtain payload bytes*, not
+  a server fetch strategy.** The fetch decision lives in operator/CLI code. This corroborates the
+  45-module result (0 vs 3,547-hit control) and **closes the R-1 residual that has been carried since
+  D10.**
+- **D11_merlin — the COM premise does not hold.** `DllInstall`, `DllRegisterServer`,
+  `DllUnregisterServer` and `VoidFunc` all compile to the **identical body** `main_run(main_url, …)`:
+  **zero registry writes, zero COM.** They are four names for one action, not a registration
+  primitive. The genuinely distinct primitive is **`Run`**, which parses the literal `"rundll32"`
+  (immediate `0x32336c6c646e7572`) out of `os.Args[1]` and takes an operator URL from `os.Args[5]`.
+  The **7-symbol export claim is exact** — all 7 addresses enumerated, `.def` and shipped binary
+  agree, no eighth.
+- **D5 §13 → D11_havoc — `Syscalls.c:75` is correct.** havoc-deep's own verification pass produced
+  `:76`; the true line is `:75`. Root cause recorded in `D11_havoc_native_win32.md` §8.5: the recheck
+  used `Select-Object -Skip 73` (which begins at line 74) with a counter starting at 74, so every
+  displayed line number was one too high. **The verification pass was the error, not the catch** —
+  strictly worse than not rechecking, because it replaced a correct citation while wearing the
+  authority of an audit.
 
 ## Platform note
 
