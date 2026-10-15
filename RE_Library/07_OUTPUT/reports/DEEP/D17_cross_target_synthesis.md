@@ -94,10 +94,50 @@ unauthenticated handshake *beneath* `CERT_NONE` — Pupy has four crypto systems
 it.**
 
 **This is the sixth instrument in the corpus whose zero needed its control, and the first where the
-control was the only thing standing between a lane and shipping a wrong finding.** The probe was
-capable; the *path filter* was the defect. Same shape as instance 3 (non-recursive glob reads a
-nested tree as flat) and instance 5 (root-anchored `.gitignore` rules match nothing): **a scoping
-error presenting as an absence, where the scope is the thing that silently failed.**
+control was the only thing between a lane and shipping a wrong finding.** The probe was capable; the
+*path filter* was the defect. Same shape as instance 3 (non-recursive glob reads a nested tree as
+flat) and instance 5 (root-anchored `.gitignore` rules match nothing): **a scoping error presenting as
+an absence, where the scope is the thing that silently failed.**
+
+### 1.0.1 The denominator defect — the same failure at the third level, and it was found by asking
+
+android-diver then turned the same probe on **its own delivered report**, and D3 §10.1 was wrong.
+**Lead-verified independently this round:**
+
+| ahmyth subtree | files | bytes |
+|---|---:|---:|
+| `AhMyth-Server\app\node_modules` | **7,911** | **124,076,770** |
+| everything else | 526 | 21,241,085 |
+| **total as published in D3 §10.1** | **8,437** | **145,317,855** |
+
+**`node_modules` is 93.8% of the file count and 85.4% of the bytes** of the number D3 §10.1 presents
+as the AhMyth denominator for a first-party/vendored split. **The real first-party client is
+`AhMyth-Client`, 41 files / 139,112 B.** AndroRAT is affected differently: **2,479 of 4,008 files
+(61.9%) / 27,388,229 B (50.4%) are decompiled `.smali`**, not AndroRAT's Java.
+
+**So a report that names a split "first-party vs vendored" counted three separate vendored
+dependency closures into its own denominator** — `node_modules` (7,911), `okhttp3`+`io.socket` smali
+(385), and AndroRAT's smali (2,479). The §10.2/§10.3 first-party *counts* (12 Java / 19 Java) are
+separately enumerated and hold; **it is the framing denominator and the §10.5 ratios resting on it
+that were wrong.**
+
+**This is the same failure as §1.0, one level up, and the progression is worth stating plainly:**
+
+| level | what failed | what it looked like |
+|---|---|---|
+| 1 | **the probe**: a path filter excluded the tree | 16 clean zeros |
+| 2 | **the attribution**: 385 smali files called vendored | correct, once asked where they lived |
+| 3 | **the denominator**: 7,911 `node_modules` files counted as first-party-adjacent | **93.8% of a headline number** |
+
+**At level 3 there was no probe to control and no zero to doubt.** The number was produced correctly,
+by a working instrument, from the right tree — and it was the wrong number because **the boundary it
+measured was drawn wrong.** A positive control on an extractor cannot catch this. **The only thing
+that caught it was a lane asking whether its own split was complete.**
+
+**Recorded here because it is the generalisable part:** the instrument rule (§6) covers tools that
+return nothing. This covers **a tool that returns exactly the right answer to the wrong question**,
+which is undetectable from the output and is why "enumerate your denominator" is a separate discipline
+from "control your probe."
 
 ### 1.1 The Pupy finding worth carrying forward
 
@@ -287,7 +327,7 @@ layer existed.
 its own purpose and simply landed outside a fence drawn elsewhere. **That is why a code review looking
 for bypasses would miss all three.**
 
-### 4b.1 The Covenant instance, in detail, because it is the cleanest
+### 4b.1 The Covenant instance, in detail, because it is the cleanest — and now service-level
 
 Five of six SignalR hubs carry class-level `[Authorize]`. **`CovenantHub.cs` carries none** — zero
 attribute lines in the file — and `Startup.cs:238` maps it bare at `/covenanthub` with no
@@ -300,14 +340,72 @@ provisions a 2000-day Identity user, stores the JWT, and can bind a listener
 > **The same operation via `POST api/listeners` requires `RequireJwtBearer`. Via `/covenanthub` it
 > does not.** Two channels, same capability, one gated.
 
-**An honest correction made in-flight, and it is the sixth instrument:** covenant-diver's first pass
-reported `CovenantHub` as **~230 unauthenticated methods.** It has **one.** The other 222 are inside
-**two block comments** (`L35-161`, `L166-1151`) — a textual `public` grep counts dead code. **Off by
-223×.** Corrected in-report at §4.0 rather than quietly patched.
+**THE CONTROL LIVES IN EXACTLY ONE PLACE — service-level evidence, D13 §8.1.** covenant-diver
+enumerated `CovenantService.cs` (255,768 B / 5,138 lines) for the full negative set and found
+**zero** `[Authorize]`, `[AllowAnonymous]`, `RequireRole`, `HasPermission`, `HttpContext`,
+`RequireJwtBearer`, `IAuthorizationService`, or policy literals. **All six token hits resolve to two
+methods D13 already documents** — and `GetCurrentUser` (L446-454) was **read, not counted**: it does
+`_userManager.GetUserAsync(principal)`, throws `ControllerNotFoundException` if null, and returns the
+record. **No role test, no ownership test. It is a lookup, not a check.**
 
-**A textual count is not a reachability count.** That is the same lesson as the `TaskDispatch` premise
-(D12 §2) and the `COMMAND_` prefix (D12 §9 F1), arriving a third time from a third lane: **the count
-was of the text, and the question was about the program.**
+**Controls calibrated both directions:** `CovenantUserApiController.cs` = **8**, `Startup.cs` = **4**,
+`CovenantService.cs` = **0**, `CovenantHub.cs` = **0** (independently re-confirming the
+zero-attribute claim).
+
+> **The service implementing all 183 operations contains no authorization decision of its own. The
+> control lives entirely in the controller attributes — which is exactly why the hub path has nothing.
+> There is no second layer to catch it. The alternate path lapsed because the control was only ever in
+> one place, and the hub is not that place.**
+
+**That sentence is the general mechanism for §4b**, not just this instance: Sliver's control lives in
+the transport interceptor, so the in-process executor has nothing; Havoc's lives in the wrapper, so the
+raw import has nothing. **In all three, the control existed in exactly one place and the alternate
+path was never that place.**
+
+### 4b.1a The REVERSE shape — and why it took a second detector to find
+
+covenant-diver then ran the probe I asked for (enumerate commented-out `services.Add*` and
+block-commented classes) and got a **clean negative**: `CovenantHub.cs` is the **only** file in the
+entire Covenant tree with a multi-line block comment, detector calibrated against both known spans
+before being run tree-wide. Three commented-out `services.Add*` lines at `Startup.cs:196-198`, all one
+abandoned architecture, **two of the three naming types that do not exist** (`CovenantBlazorService`,
+`SignalRCovenantService`) — tombstones for deleted classes.
+
+**The fifth artifact appeared from a different detector**, which is the methodological point:
+
+> **An enumeration is only as complete as the detector's shape.** The comment-detector could not see
+> it, and no amount of calibrating that detector would have found it.
+
+`Core/CovenantAPIService.cs` — 3,951 B / 95 lines — is **live in DI** at `Startup.cs:194`, the line
+**immediately above** the three commented-out ones. It authenticates with
+`configuration["ServiceUserToken"]`, implements **real certificate pinning**
+(`cert.GetCertHashString() == covenantCert.GetCertHashString()`) — better built than
+`CovenantHubService`'s `return true` stub — and **has zero consumers: three references total, all
+declaration or registration, zero constructor injections, zero field refs, zero call sites.**
+
+> **It is the REVERSE of §4b's shape.** `CovenantHub.CreateHttpListener` is **reachable but ungated**.
+> `CovenantAPIService.CreateHttpListener` is **gated but unreachable**.
+
+**Marked `[inference]`, deliberately not promoted — capability present, reachability absent.** D13 §8.3
+tabulates all four paths to `CreateHttpListener`; **path 2 (the hub) is the only one of the four with no
+gate.**
+
+### 4b.1b One abandoned topology, not five incidents
+
+**This revises D13 §4.4, and the revision is covenant-diver's own, on its own earlier conclusion.**
+`CovenantHubService` is literally `IRemoteCovenantService` — the **remote** implementation of the
+operator service, the local one being `CovenantService`. **The hub was the server half of a deliberate
+two-process split** (Blazor front end → SignalR proxy → service) that was abandoned and dismantled
+**asymmetrically**: hub methods block-commented but the class left mapped with one method live; the
+proxy disabled at DI but left in the tree.
+
+> **`CovenantHub` is the surviving half of an abandoned architecture, and the one method left live in
+> it is a listener-creation entry point the abandonment never gated.** The live/comment boundary at
+> `L161/162` is the exact line where the author stopped commenting.
+
+**That is a better result than "unprotected hub," and it is why the counting exercise was worth
+running.** A report that stopped at "the hub has no `[Authorize]`" would have been correct and would
+have described a *mistake*. **What is actually there is the remains of a design.**
 
 ### 4b.2 What does NOT generalize, stated so it is not over-claimed
 
@@ -388,6 +486,70 @@ a legitimate finding and it is indistinguishable, on the page, from a probe that
 
 ---
 
+## 6.5 A duplicated-defect pattern, found by checking the smallest claim first
+
+**This is not a framework difference — it is a defect class that spans the corpus, and it reached six
+files in one directory.** Placed here rather than in §2 because it is an artifact of *how the code was
+written and copied*, not of any framework's protocol design.
+
+`recv_pt_task_opsec_post_response.go:46` contains:
+
+```sql
+UPDATE apitokens SET deleted=true AND active=false WHERE task_id=$1
+```
+
+**`SET a=true AND b=false` is not two assignments.** SQL requires a comma between assignments, so this
+parses as `deleted = (true AND active=false)` — **`active` is never set.** The correct form is
+`SET deleted=true, active=false`.
+
+**android-diver wrote it up as an isolated typo in one file, then ran one `Select-String` across the
+directory. It is six files. Lead-verified:**
+
+| file | line |
+|---|---|
+| `recv_pt_task_opsec_post_response.go` | 46 |
+| `recv_pt_task_opsec_pre_response.go` | 41 |
+| `recv_pt_task_create_response.go` | 46 |
+| `recv_pt_task_process_response.go` | 27 |
+| `recv_pt_payload_build_response.go` | 92 |
+| `utils.go` | 796 |
+
+**And the correct comma form is in use in sibling files for the identical statement — `eventing.go:747`
+and `:1595`, `check_container_status.go:219`, `initialize.go:177`** all write
+`SET deleted=true, active=false`. Note `eventing.go:747` is **twelve lines** from the class of code that
+gets this right.
+
+> **So the finding is not "someone didn't know SQL." It is a wrong idiom duplicated five times while
+> the right one sits in a neighbouring file.** That is a *searchable pattern*, not a line to patch —
+> and had it shipped as isolated, the corpus would carry a one-file defect where a six-file pattern
+> exists.
+
+**Verification status, stated precisely:** the six sites and the four correct-form controls are
+**verified**. Whether **MySQL accepts the malformed `SET` or errors** is **NOT verified** — mysql would
+have to be run and it was not. **That distinction decides the impact: if it errors, the token is never
+invalidated and the error is swallowed; if it is accepted, `active` silently keeps its old value.**
+Both are worse than intended, and they are not the same defect. Recorded as an open unknown, not
+asserted.
+
+**This is §1.0.1's pattern again, one layer over: the first measurement was correct and the scope was
+wrong.** android-diver's own words: *"had I written it up as isolated, the corpus would carry a one-file
+defect where a six-file pattern exists."*
+
+### 6.5.1 The refinement android-diver made to the denominator rule, and it is better than mine
+
+I wrote §1.0.1's rule as **"enumerate your denominator."** android-diver's correction, from having
+actually run it:
+
+> **"Enumerate your denominator" isn't the rule that would have caught me. I did enumerate it —
+> correctly, from disk. What was wrong was the BOUNDARY of the set I chose to enumerate: I enumerated
+> under a path that contained dependencies. The rule that catches this is "justify the boundary, not
+> the count" — state why each subtree is IN scope before totalling.**
+
+**Accepted, and it supersedes my phrasing.** A correct count of a wrongly-bounded set is still wrong,
+and the count will look healthy. **The denominator is a boundary decision; the enumeration is just
+arithmetic performed inside it.** Stating the exclusion classes *with sizes* — which is what the
+corrected D3 §10.1 does — makes the boundary auditable in a way a total never is.
+
 ## 7. What REDACTED gains at the composition layer
 
 REDACTED is a Python orchestrator plus LLM: MCTS over a 65-action world model, parallel swarms
@@ -454,10 +616,23 @@ Stated rather than smoothed:
    `ICovenantAPI.cs` (93 KB), and `CovenantHubService.cs` (47 KB) were **not read at all.** §4b.1's
    Covenant instance rests on an attribute-level scan, which is the right level for that finding but
    is not a full read of the service layer.
-4. **Mythic's post-response siblings are partially covered.** D4 §13.3 flagged one file
-   (`util_agent_message_actions_post_response.go`, 142,962 B); a second exists
-   (`recv_pt_task_opsec_post_response.go`, 7,270 B) and is in no report. D11_mythic covers
-   post_response crypto; the second sibling is not established as covered.
+4. **Mythic's `recv_pt_task_opsec_post_response.go` — RETIRED, read in full. CORRECTED, and this
+   claim was originally false here.** The first draft of this document stated the file "is in no
+   report." **That was wrong — a false claim about the corpus's own coverage.** It **is** cited at
+   `T4_mythic.md:559`, as the `PT_TASK_OPSEC_POST_CHECK` consumer. The accurate statement was
+   narrower: T4 **named it once, as a `[source:]` citation for a queue name** — a *naming*, not a
+   *reading*.
+   **android-diver has since read all 187 / 187 lines. Full note at `D18_mythic_opsec_post_response.md`.**
+   Three findings, and the first is a corpus pattern promoted to §6.5:
+   - **The malformed `SET deleted=true AND active=false` is in SIX files, not one**, with the correct
+     comma form in use in four sibling files (§6.5, Lead-verified).
+   - **`checkForTaskInterception` (`:162-187`) runs OUTSIDE the OPSEC gate and can reverse a
+     `SUBMITTED` verdict** — an operator event group can stop a task the gate already approved, so
+     **the gate is not the final authority on execution.**
+   - **`:87`'s script-only path makes the `addTaskById` at `:132` unreachable for that class.**
+   **Error class, recorded because it recurs: a claim about what the corpus knows about itself, made
+   without checking the corpus.** Same shape as the retracted citation-count pattern — **the failure is
+   not in the target, it is in the index.**
 5. **Metasploit's 2,715 exploit modules are counted, not enumerated** (D9). Every MSF row above is
    from the core library and the handler layer, not from the exploit side.
 6. **Android's transport is covered in D3** (§1.0 above); the 146 unread lines of

@@ -7,7 +7,9 @@
 
 **Tags:** `[src]` = read directly from the tree · `[inference]` = my deduction · `[absent]` = searched and not found, with the search stated
 
-**Headline, stated up front so it is not buried:** Covenant's API layer is **1,084,841 B across 23,549 lines but only 183 operations** — it is an AutoRest-generated REST client façade with provably uniform structure. The authorization model is **not** in that file, and it is materially more rigorous than Sliver's: **18 of 18 API controllers carry a class-level `Authorize` policy**, and there is a real five-role Identity model. But there is **one unannotated 1,153-line SignalR hub — `CovenantHub`, mounted at `/covenanthub` — with ~230 callable methods and no `[Authorize]`**, while all five of its sibling hubs carry it. That is the D11 pattern repeating, and it is this report's primary finding.
+**Headline, stated up front so it is not buried:** Covenant's API layer is **1,084,841 B across 23,549 lines but only 183 operations** — it is an AutoRest-generated REST client façade with provably uniform structure. The authorization model is **not** in that file, and it is materially more rigorous than Sliver's: **17 of 17 API controllers carry a class-level `RequireJwtBearer` policy** across all 183 actions, and there is a real five-role Identity model. But there is **one unannotated 1,153-line SignalR hub — `CovenantHub`, mounted at `/covenanthub` with no `.RequireAuthorization()` — and it exposes exactly ONE live method, `CreateHttpListener`, which is a listener-creation entry point no gate reaches**, while all five of its sibling hubs carry `[Authorize]`. That is the D11 pattern repeating, and it is this report's primary finding.
+
+**Correction carried in the header, not buried in §4.0:** an earlier draft of this report stated that `CovenantHub` had **~230 callable methods**. It has **one**. The other **222** public members are inside two block comments (`L35-161`, `L166-1151`). The error came from counting `public` tokens textually, which counts commented-out code. **A textual count is not a reachability count.** The measurement and its method are in §4.0; §8.4 revises what the finding means.
 
 ---
 
@@ -20,6 +22,7 @@
 5. [InternalListener — what it is and who can create one](#5-internallistener)
 6. [Comparison against D11 §2](#6-comparison-against-d11-2)
 7. [Residual unknowns](#7-residual-unknowns)
+8. [The disabled-channel pattern, and the service-level negative](#8-the-disabled-channel-pattern-and-the-service-level-negative)
 
 ---
 
@@ -1026,6 +1029,200 @@ The actual operator control plane is `Controllers/` — **183 actions across 17 
 **Correction to my own first draft, recorded because the method matters:** I initially reported `CovenantHub` as ~230 unauthenticated callable methods. It has **one**. The count came from matching `public` members textually, which counts commented-out code. The live/comment split (**2 live, 222 dead** — the constructor and one method) required reading line ranges, not grepping. A textual count is not a reachability count. `[inference]`
 
 **Boundaries:** `CovenantService.cs` was read at ~5% (auth-critical regions); `CovenantAPIExtensions.cs` (212 KB), `ICovenantAPI.cs` (93 KB), and `CovenantHubService.cs` (47 KB) were not read at all; no build was run and no runtime verification was performed. Whether Covenant's own client invokes `CovenantHub.CreateHttpListener` is unresolved — the class's unauthenticated status does not depend on it.
+
+---
+
+## 8. The disabled-channel pattern, and the service-level negative
+
+*Added after the initial delivery of this report, in response to a targeted probe from the Team Lead. §1-7 stand as written; §8 extends them.*
+
+### 8.1 The service-level negative — D13 §2.9 promoted from attribute-level to implementation-level
+
+§7 named the largest limitation of this report: `CovenantService.cs` (255,768 B / 5,138 lines) was read at ~5%, so a permission check implemented inside a service method with no controller attribute would be **invisible** to an attribute-based method. That limitation is directly testable, and it was tested.
+
+**Method:** enumerate `Core/CovenantService.cs` for the full auth-relevant token set. Counts were small enough that every site was listed individually rather than sampled. `[src]`
+
+| Token | Count in `CovenantService.cs` |
+|---|---|
+| `[Authorize` | **0** |
+| `[AllowAnonymous` | **0** |
+| `RequireRole` | **0** |
+| `HasPermission` | **0** |
+| `HttpContext` | **0** |
+| `RequireJwtBearer` / `RequireAdministratorRole` | **0** |
+| `IAuthorizationService` / `AuthorizationPolicy` / `IAuthorizationRequirement` | **0** |
+| `ClaimsPrincipal` | **4** |
+| `IsInRole` | **1** |
+| `IsAuthenticated` | **1** |
+
+**Every one of the six hits resolves to exactly two methods, both already documented in §2.9:** `[src]`
+
+- **L36, L38** — interface declarations in `ICovenantService`.
+- **L446** `GetCurrentUser(ClaimsPrincipal principal)` — read at L446-454:
+  ```csharp
+  public async Task<CovenantUser> GetCurrentUser(ClaimsPrincipal principal)
+  {
+      CovenantUser user = await _userManager.GetUserAsync(principal);
+      if (user == null) { throw new ControllerNotFoundException($"NotFound - Could not identify current username"); }
+      return await this.GetUser(user.Id);
+  }
+  ```
+  **It is a lookup, not a check.** It performs no authorization decision, no role test, and no ownership comparison. It throws when the principal is unresolvable and otherwise returns the record.
+- **L481-487** `CreateUserVerify` — `L483 !principal.Identity.IsAuthenticated`, `L487 !principal.IsInRole("Administrator")`. This is §2.9's bootstrap guard.
+
+**Verdict: ZERO authorization sites in `CovenantService.cs` that D13 does not already account for.** `[src]`
+
+**Positive controls, run against the same pattern in three files:**
+
+| File | Hits for `[Authorize` + `[AllowAnonymous` + `RequireRole` + `HttpContext` |
+|---|---|
+| `Core/CovenantService.cs` | **0** ← the negative |
+| `Controllers/ApiControllers/CovenantUserApiController.cs` | **8** ← instrument demonstrably finds them |
+| `Startup.cs` | **4** ← instrument demonstrably finds them |
+| `Hubs/CovenantHub.cs` | **0** ← independently re-confirms §4.1 |
+
+`[src]` The instrument is calibrated: it returns 8 and 4 where the tokens exist, and 0 where they do not.
+
+**Why this is a promotion and not a formality.** D13 §2.8/§2.9 established class-level coverage at the **attribute** level — 17 of 17 controllers carry `RequireJwtBearer`. That left the open question of whether the *service* beneath the attribute supplied a second layer of checks. **It does not.** The service that implements all 183 operations contains **no authorization decision of its own** except the single first-user bootstrap guard.
+
+**The general mechanism, and this is the transferable finding:**
+
+> **The control existed in exactly one place — the controller attributes — and the alternate path was never that place. `CovenantHub.CreateHttpListener` reaches the same service method as `POST api/listeners`, but it enters below the attribute layer, and there is no second layer under it to catch the call.**
+
+`[inference]` This generalizes the §4b pattern from "a control lapsed on an alternate path" to **why** it lapsed: the control was architecturally single-sited. This is the same shape as Sliver's transport interceptor (an in-process executor never passes through it) and Havoc's wrapper (a raw import need not use it). **In all three cases the alternate path bypasses nothing — it simply never enters the one place the check lives.** `[inference]`
+
+### 8.2 The probe for further disabled channels — method and result
+
+**Probe:** enumerate every commented-out DI registration and every block-commented class/method across `Core/` and `Hubs/`, with a positive control proving the detector finds live code. `[src]`
+
+**(a) Commented-out `services.Add*` — a positive control was run first.** `Startup.cs` contains **14 live** `services.Add*` lines and **3 commented-out** ones. The detector finds both classes. `[src]`
+
+```
+Startup.cs:194   services.AddSingleton<CovenantAPIService, CovenantAPIService>();   <-- LIVE
+Startup.cs:195   services.AddTransient<ICovenantService, CovenantService>();        <-- LIVE
+Startup.cs:196  // services.AddTransient<IRemoteCovenantService, CovenantHubService>();
+Startup.cs:197  // services.AddTransient<CovenantBlazorService>();
+Startup.cs:198  // services.AddSingleton<SignalRCovenantService>();
+```
+
+**Three consecutive disabled registrations, all members of one abandoned architecture.** `[src]` Two of the three name types that **do not exist anywhere in the tree**: `[src]`
+
+| Type named on a commented line | Declarations found tree-wide |
+|---|---|
+| `CovenantHubService` | **1** (`Core/CovenantHubService.cs:22`) — exists, disabled at DI |
+| `CovenantBlazorService` | **0** — the type does not exist |
+| `SignalRCovenantService` | **0** — the type does not exist |
+
+`[src]` So `AddTransient<CovenantBlazorService>()` and `AddSingleton<SignalRCovenantService>()` are comment lines naming classes that were **deleted**, not merely unregistered. The block at `:196-198` is a tombstone for a service topology that was removed from the codebase. `[inference]`
+
+**(b) Block-commented classes and methods — detector calibrated, then run tree-wide.** The detector locates multi-line `/* … */` spans and reports their ranges. **Positive control:** it correctly finds the two known spans in `CovenantHub.cs` (`L35-161`, `L166-1151`). **Result:** across `Core/` and `Hubs/`, and then across the entire `Covenant/` tree, **`CovenantHub.cs` is the only file containing a multi-line block comment.** `[src]`
+
+**No fifth artifact of the block-comment shape exists.** `[src]` The enumeration is complete for that shape, because the detector returns both known spans on a tree where it was calibrated to find them.
+
+**(c) The alternate-implementation hunt returned exactly one live implementation of the operator service.** `[src]` — classes deriving from an `I*Service` interface:
+
+| Class | Interface | Status |
+|---|---|---|
+| `CovenantService` | `ICovenantService` (`CovenantService.cs:375`) | **LIVE** — registered `Startup.cs:195` |
+| `CovenantHubService` | `IRemoteCovenantService` (`CovenantHubService.cs:22`) | **disabled** — `Startup.cs:196` commented |
+| `NotificationService` | `INotificationService` (`NotificationService.cs:200`) | **LIVE** — registered `Startup.cs:193` |
+
+`[src]` **There is exactly one live implementation of the operator service interface.** The second implementation is the disabled `CovenantHubService`.
+
+### 8.3 The fifth artifact — an armed client with no consumer
+
+**The probe's clean negative on the block-comment shape did not mean the pattern had run out.** Widening the detector to any class holding a `TokenCredentials` (i.e. anything that authenticates to Covenant's own API) surfaced a fifth artifact of a **different shape**, which is precisely why the comment-detector could not see it. `[src]`
+
+`Core/CovenantAPIService.cs` — **3,951 B / 95 lines**, and it is **not commented out and not disabled**: `[src]`
+
+```csharp
+// Core/CovenantAPIService.cs:14-32
+public class CovenantAPIService
+{
+    private readonly CovenantAPI _client;
+
+    public CovenantAPIService(IConfiguration configuration)
+    {
+        X509Certificate2 covenantCert = new X509Certificate2(Common.CovenantPublicCertFile);
+        HttpClientHandler clientHandler = new HttpClientHandler
+        {
+            ServerCertificateCustomValidationCallback = (sender, cert, chain, errors) =>
+            {
+                return cert.GetCertHashString() == covenantCert.GetCertHashString();   // <-- REAL pinning
+            }
+        };
+        _client = new CovenantAPI(
+            new Uri("https://localhost:" + configuration["CovenantPort"]),
+            new TokenCredentials(configuration["ServiceUserToken"]),
+            clientHandler
+        );
+    }
+
+    public async Task CreateHttpListener(HttpListener listener)      // :33
+    { await _client.CreateHttpListenerAsync(ToAPIListener(listener)); }
+
+    public async Task CreateBridgeListener(BridgeListener listener)  // :38
+    { await _client.CreateBridgeListenerAsync(ToAPIListener(listener)); }
+}
+```
+
+`[src]` **Three properties, and they pull in opposite directions:**
+
+1. **It is live in DI** — `[src]` `Startup.cs:194` `services.AddSingleton<CovenantAPIService, CovenantAPIService>();` — the live registration immediately above the three commented-out ones.
+2. **It authenticates with the `ServiceUser` credential** — `[src]` `configuration["ServiceUserToken"]`. Per §3.2 and §3.4, `ServiceUser` is one of the **three roles granted but never required by any policy**. It is a full-scope operator token, not a scoped one.
+3. **It calls the server's own REST API over HTTPS** — `CovenantAPI` against `https://localhost:{CovenantPort}` — into `POST api/listeners` and `POST api/listeners/bridge`. `[src]` Those endpoints are gated by `[src]` `ListenerApiController.cs:17` class-level `RequireJwtBearer`.
+
+**And it has no consumer.** `[src]` — an exhaustive tree-wide scan for `CovenantAPIService` returns **exactly three references**, all of them the declaration and its registration:
+
+```
+Startup.cs:194                      registration
+Core/CovenantAPIService.cs:14       class declaration
+Core/CovenantAPIService.cs:18       constructor
+```
+
+`[src]` **Zero constructor injections, zero field references, zero call sites.** `CovenantService` does not take it as a dependency (verified: no `CovenantAPIService` occurrence in `CovenantService.cs`). Nothing in the tree calls `CreateHttpListener` or `CreateBridgeListener` on it.
+
+**Assessment — and the discipline matters here:**
+
+**This is dead-but-retained, not a live path.** `[inference]` It is resolved by DI at startup and therefore **instantiated**, but no code path invokes its two methods. That is the same status as `CovenantHubService`: capability present, reachability absent.
+
+**It is the reverse of §4's shape, and that is why it is worth recording.** `CovenantHub.CreateHttpListener` is *reachable but ungated*. `CovenantAPIService.CreateHttpListener` is *gated but unreachable*. Both are the same underlying confusion — a listener-creation entry point living outside the controller layer. Covenant has **four** paths to `CreateHttpListener`:
+
+| Path | Entry | Gate | Reachable |
+|---|---|---|---|
+| 1 | `POST api/listeners/http` → `ListenerApiController:156` | `RequireJwtBearer` (`:17`) | **yes** |
+| 2 | SignalR `/covenanthub` → `CovenantHub:162` | **none** | **yes** |
+| 3 | `InternalListener` → `_client.CreateHttpListenerAsync` (`InternalListener.cs:112-116`) | JWT via `TokenCredentials` | **yes**, when a listener is created |
+| 4 | `CovenantAPIService:33` → `_client.CreateHttpListenerAsync` | `RequireJwtBearer` at the target | **no** — no consumer |
+
+`[src]` for the entry points and gates; `[inference]` on reachability. **Path 2 is the only one of the four with no gate.**
+
+**Why the cert-pinning detail matters, if it were ever re-registered.** `[inference]` Unlike `CovenantHubService.cs:30-33`, which stubs its callback to **`return true` unconditionally**, `CovenantAPIService` implements **real certificate pinning** (`cert.GetCertHashString() == covenantCert.GetCertHashString()`) — and it is the same technique `InternalListener` uses. So this artifact is better-built than the disabled one next to it. The risk it carries is not a stub; it is that it holds a **`ServiceUser` token with no role requirement** and two unrestricted listener-creation methods. If a future change injects it into a controller or a startup path, it would present a fully-privileged client with no scope limit and no consumer-side check — and nothing in its own code would object. **Stated as `[inference]`: capability present, reachability absent, and the only thing preventing reachability is that no one has written a call site.** `[inference]`
+
+### 8.4 The five artifacts, tallied
+
+**Covenant contains five disabled or parallel channels sitting beside live ones.** `[src]` for each finding; `[inference]` for the grouping.
+
+| # | Artifact | Shape | Status | Where |
+|---|---|---|---|---|
+| 1 | `CovenantHub` | reachable, **ungated** | **live** | §4 |
+| 2 | Re-declared `RequireJwtBearer` against scheme `"Bearer"` | gated, target scheme never registered | **live but unevaluated** | §2.6 |
+| 3 | 222 hub methods | block-commented | disabled | §4.0 |
+| 4 | `CovenantHubService` | 233 proxies, DI-registered-out, cert check stubbed `true` | disabled | §8.2 |
+| 5 | `CovenantAPIService` | gated, pinned, **no consumer** | **live but uncalled** | §8.3 |
+
+**The reading this supports — a revision to §4.4.** `[inference]` §4.4 concluded that the block-commented hub "was being developed as a permission-blind mirror, and the author discovered it and disabled it." §8.1-§8.3 support a sharper version: the author had built a **two-process topology** in which the Blazor/Razor front end would talk to a SignalR service proxy (`CovenantHubService`, `CovenantBlazorService`, `SignalRCovenantService`) rather than directly to `CovenantService`. `[src]` `CovenantHubService` is literally `IRemoteCovenantService` — the *remote* implementation of the operator service, the local one being `CovenantService`. **The hub was the server half of that split.** When the split was abandoned, both halves were dismantled asymmetrically: the hub's methods were block-commented but the class was left mapped at `/covenanthub` with one method left live; the proxy was disabled at DI but left in the tree. **The result is artifact 1.** `[inference]`
+
+**The correction to my own §4 framings is therefore substantive, not cosmetic:** `CovenantHub` is not "an unprotected hub that nobody noticed." It is **the surviving half of a deliberately abandoned architecture, and the one method left live in it is a listener-creation entry point that the abandonment never gated.** The live/comment boundary at `L161/162` is the exact line where the author stopped commenting. `[inference]`
+
+### 8.5 What is still not established
+
+1. **No fifth artifact of the block-comment shape exists** — that enumeration is complete, with a calibrated detector. `[src]`
+2. **The alternate-implementation hunt is complete for `I*Service` derivations** — one live operator-service implementation. `[src]`
+3. **But the `CovenantAPIService` find came from a different detector (`TokenCredentials`), which proves the enumeration is only as complete as the detector's shape.** Any sixth artifact in a third shape would still be invisible. **Stated as a boundary, not as a closed result.** `[inference]`
+4. **No build was run and no runtime verification was performed.** DI reachability for artifacts 4 and 5 is inferred from source — `CovenantAPIService` is genuinely instantiated at startup as a singleton, but I did not observe that, nor did I observe that its methods are never called by any path outside this source tree (e.g. reflection, a Razor page I did not read, or a hosted service). `[inference]`
+5. **Whether Covenant's own client invokes `CovenantHub.CreateHttpListener`** — still unresolved, as §7 item 5. Now foregrounded: if the answer were *yes*, path 2 in §8.3 would be an actively used unauthenticated listener-creation route.
+
 
 
 

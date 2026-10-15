@@ -105,9 +105,9 @@ Plus three vendored libraries, tagged as such: `jquery-3.1.1.min.js` (86,713), `
 
 **AndroRAT first-party: 2 Python files + 21 Java sources = 23 files.** Both Python files and the Java set were read.
 
-**The vendored mass — 8,437 AhMyth files and 4,008 AndroRAT files — was enumerated and not read**, except where a vendored file is the object of an action (the payload `AndroidManifest.xml`, the signing keys).
+**The vendored mass — 8,437 AhMyth files and 4,008 AndroRAT files, of which 10,734 files are three dependency closures — was enumerated and not read**, except where a vendored file is the object of an action (the payload `AndroidManifest.xml`, the signing keys). **§10.1 corrects how that mass is bounded**: 7,911 of those AhMyth files are `node_modules` and 2,479 of the AndroRAT files are decompiled smali.
 
-**Measured read fraction: 68 first-party files read of 12,445 total files = 0.55% of the tree.** The tree is 99.45% vendored and decompiled material. **The 0.55% is the code that implements both RATs**, which is why it is the fraction that matters — and the same distinction as D7 §1 and D8 §1.3.2 applies: this is reading coverage over the whole tree, and it is small because the tree is mostly dependencies.
+**Measured read fraction: 39 first-party files read of 12,445 total files = 0.31% of the tree.** The tree is 99.45% vendored and decompiled material. **§10.1.1 restates this against three denominators** — 0.31% of everything on disk, 2.28% of non-dependency files, and **37.5% of the 104 first-party files**. The last is the figure that answers "how much of the code the authors wrote did you read," and it is the one to quote for that question. **The same distinction as D7 §1 and D8 §1.3.2 applies: reading coverage over the whole tree is small because the tree is mostly dependencies, and the honest number depends on which denominator the question is asking about.**
 
 **Every count in this report comes from command output.** No count was reconstructed from memory — see §1.5.
 
@@ -649,14 +649,61 @@ The analytical rule this yields: **for any RAT that ships a prebuilt APK alongsi
 
 ## 10. FIRST-PARTY VS VENDORED — THE MEASURED SPLIT
 
-### 10.1 Denominator
+### 10.1 Denominator — and a correction to this section's first version
 
-The whole report rests on this split, so both trees were enumerated from disk immediately before writing.
+The whole report rests on this split, so both trees were enumerated from disk immediately before writing. **The first version of this table published two raw totals and presented them as the basis for a first-party/vendored split. The totals were enumerated correctly and were still the wrong denominator, because they count dependency closures as if they were the target.** The correction follows the table.
+
+**Raw, as first published — kept for the record:**
 
 | Tree | Files (`.git` excluded) | Bytes | Source |
 |---|---|---|---|
 | `ahmyth` | **8,437** | **145,317,855** | [source: recursive enumeration] |
 | `androrat` | **4,008** | **54,326,832** | [source: recursive enumeration] |
+
+**What those totals actually contain.** Both figures were re-measured with the dependency closures separated out:
+
+| Tree | Subtree | Files | Bytes | % of files | % of bytes |
+|---|---|---|---|---|---|
+| `ahmyth` | **`AhMyth-Server/app/node_modules`** | **7,911** | **124,076,770** | **93.8%** | **85.4%** |
+| `ahmyth` | everything else | 526 | 21,241,085 | 6.2% | 14.6% |
+| `ahmyth` | *of which* `AhMyth-Client` (the implant) | **41** | **139,112** | 0.5% | 0.1% |
+| `ahmyth` | *of which* `AhMyth-Client/app/src` | **26** | **62,484** | 0.3% | 0.04% |
+| `androrat` | **`*.smali` (decompiled bytecode)** | **2,479** | **27,388,229** | **61.8%** | **50.4%** |
+| `androrat` | everything else | 1,529 | 26,938,603 | 38.2% | 49.6% |
+
+[source: recursive enumeration of each tree with the closure paths excluded/included as shown]
+
+**The correction, stated plainly.** The first table's `ahmyth` figure of 8,437 files / 145,317,855 B is **93.8% `node_modules` and 85.4% `node_modules` by bytes.** Presenting it as the denominator for a first-party split is wrong, and the error is specific: **the number is correct and the boundary is wrong.** A working instrument, run recursively from the right tree, returned exactly the right answer to the wrong question. **The implant named AhMyth is 41 files / 139,112 B — 0.5% of the tree the table called `ahmyth`.**
+
+**Three dependency closures were counted as target material.** All three are excludable on the same rule — they are *dependencies of* the two projects rather than code either author wrote:
+
+| # | Closure | Files | Bytes | Where |
+|---|---|---|---|---|
+| 1 | `node_modules` (AhMyth-Server's Node dependencies) | 7,911 | 124,076,770 | `ahmyth/AhMyth-Server/app/` |
+| 2 | `okhttp3` + `io.socket` smali (socket.io client's transitive tree) | 344 | 3,042,701 | `ahmyth/AhMyth-Server/app/app/Factory/Ahmyth/smali/` |
+| 3 | AndroRAT `*.smali` (decompiled APK bytecode) | 2,479 | 27,388,229 | `androrat/**` |
+
+[source: enumeration filtered on each closure path]
+
+**Closure 2 is the instance that motivated this correction.** A TLS/pinning probe over both first-party trees returned **zero hits for all 16 transport-security markers** — and an unfiltered pass over the same tree returned **81 `HostnameVerifier` and 71 `TrustManager` hits**, every one of them inside this closure. They are the decompiled `okhttp3` and `io.socket` libraries, not AhMyth code. **That closure is inside the denominator in the first table above**, which is how a "first-party vs vendored" split came to include vendored material in its own total.
+
+**What is *not* affected.** §10.2's and §10.3's first-party file lists (12 AhMyth Java + 6 JS; 19 AndroRAT Java + 2 Python) were enumerated separately, directly from each project's `app/src/main/java/` and equivalent paths. **Those counts do not depend on this denominator and stand unchanged** — the correction is to the frame, not to the files.
+
+### 10.1.1 Coverage restated against the corrected denominator
+
+The read-fraction claim in §10.4 was computed against **12,445 total files**, which is the *union of the two raw totals* — i.e. it inherits the same error. Restated against first-party material only:
+
+| Measure | Against raw total (first version) | Against first-party only |
+|---|---|---|
+| Total files in scope | 12,445 | **104** (41 `AhMyth-Client` + 63 `androrat/Android_Code`) |
+| Files read in full | 39 | **39** |
+| Read fraction | 0.31% | **37.5%** |
+
+[source: first-party sets enumerated from `AhMyth-Client/` (41 files) and `androrat/Android_Code/` (63 files, 21 Java, 0 smali); read set per §1.3]
+
+**This is the one place the correction moves a claim in the report's favour** — and it should not be read as a stronger claim about coverage. Both statements are true of different denominators: **39 of 12,445 files read is 0.31% of everything on disk, and 39 of 104 is 37.5% of the code either author actually wrote.** The report's honesty about its own limits is better served by the second figure, but the first is the one that answers "how much of what's on disk did you look at." **I am reporting both because the earlier version published only the first while calling it a first-party analysis.**
+
+**§10.4's "both trees remain ~99.7% vendored and decompiled material" is directionally right but overstated** — against the 1,711 non-closure files the vendored share is **93.9%**, not 99.7%. §10.5 carries the corrected figure and the reason: the original percentage counted the dependency closures twice.
 
 ### 10.2 AhMyth — first-party
 
@@ -733,11 +780,41 @@ I am flagging this rather than silently reconciling it because §1 was seeded by
 
 **Read fraction, restated with the corrected count:** 39 first-party files read (18 AhMyth + 21 AndroRAT) out of 12,445 total files = **0.31%** of the two trees. §1's 0.55% figure assumed 68 files; the actual read set is smaller and the corrected fraction is lower. Both trees remain ~99.7% vendored and decompiled material.
 
-### 10.5 What the split is for
+### 10.5 What the split is for, with the ratios restated
 
 The purpose of the denominator is to make the coverage claim falsifiable. **Everything load-bearing in this report comes from 39 files.** §2's persistence analysis is 5 files. §3's opcode table is 3. §4's forging pipeline is 2. §6–§8's protocol analysis is 4.
 
-The vendored mass — 233,632 B of browser libraries in AhMyth, 2,479 decompiled smali files in AndroRAT — was enumerated and not read, with one exception: a vendored file was read when it is the *object* of an action rather than a dependency (the `Factory/Ahmyth/AndroidManifest.xml` forging target, and the `testkey` pair in §4.1).
+**The three exclusion classes, with sizes — this is the corrected vendored mass.** The first version of this section named two classes and omitted the largest by a factor of thirty:
+
+| # | Class | Files | Bytes | Read? |
+|---|---|---|---|---|
+| 1 | `node_modules` (AhMyth-Server Node deps) | 7,911 | 124,076,770 | no — not read |
+| 2 | `okhttp3` + `io.socket` smali (socket.io client tree) | 344 | 3,042,701 | **read once** — see below |
+| 3 | AndroRAT `*.smali` (decompiled APK bytecode) | 2,479 | 27,388,229 | no — not read |
+| | browser libraries in AhMyth | — | 233,632 | no — not read |
+| | **total excluded** | **10,734** | **154,507,700** | |
+
+[source: enumeration filtered on each closure path; browser-library figure carried from §10.2. Class 2 is `okhttp3` (193 files / 2,269,719 B) + `io.socket` (151 / 772,982); the adjacent `okio` closure (41 / 567,075) is **not** in this count — see the note below]
+
+**On class 2's boundary, because I got this wrong once already.** My first measurement of this closure included `okio` and returned 385 files / 3,609,776 B. `okio` is a separate dependency of `okhttp3` rather than part of the socket.io client path, so the honest count is **344 files / 3,042,701 B**. I am recording the discrepancy rather than quietly using the smaller number: **the closure boundary is a judgment call, and the 41-file `okio` difference is the size of that judgment.** Class 2's exclusion does not depend on it — including or excluding `okio` changes the non-closure denominator by 41 files.
+
+**Class 2 is the exception, and it inverts the rule rather than following it.** The rule is *a vendored file is read when it is the object of an action rather than a dependency*. `okhttp3`/`io.socket` smali was read for the opposite reason: it was **necessary to establish that the transport-security surface is absent from the first-party code**, which required knowing where the TLS code actually lives. The probe is in §10.1; the finding is that **all 81 `HostnameVerifier` and 71 `TrustManager` hits in the tree are inside this closure.** So class 2 was read as a *control on an absence*, not as an object of action — a third category the original rule did not have.
+
+**The load-bearing 39 files against the corrected denominator:**
+
+| Denominator | Scope | Read fraction of that scope |
+|---|---|---|
+| 12,445 files | everything on disk, both trees | 0.31% |
+| 1,711 files | **excluding all three dependency closures** | 2.28% |
+| 104 files | **first-party only** (41 AhMyth-Client + 63 AndroRAT/Android_Code) | **37.5%** |
+
+[source: denominators as enumerated in §10.1 and §10.1.1; `androrat/Android_Code` verified as 63 files, 21 Java, **0 smali** — i.e. genuinely first-party, with the 2,479 smali files living elsewhere in that tree as the compiled artifact]
+
+**These are three true statements about the same 39 files.** The report's earlier version published only the first while calling the analysis first-party. The middle row is the most defensible single figure — it is "how much of this extraction did you look at, with dependencies removed" — and the bottom row is the one that answers "did you read the code the authors wrote," which is **about a third of it**. **I am keeping all three visible rather than selecting the flattering one**, because a reader who wants to dispute coverage needs to see which denominator a claim rests on, and because the bottom row is *less* flattering than the figure my first draft of this correction used. My first draft computed the first-party set as 41 + 26 = 67 files and reported 58.2%; the 26 was `AhMyth-Client/app/src`, not the AndroRAT source tree. **The correct first-party set is 104 files and the correct fraction is 37.5%.** I caught this by re-running the arithmetic before reporting it, which is the same control that caught the original §10.1 defect.
+
+**What this means for the report's honesty about itself.** 39 files read out of 104 first-party files is not 58% coverage of the targets — **it is 37.5%, and the 65 unread first-party files include the 42 non-Java files in `androrat/Android_Code`** (Gradle files, manifests, resources) plus the 15 remaining `AhMyth-Client` files outside `app/src`. Neither RAT's build configuration or manifest set was read in full. **That is a real limit and it is now stated with a number instead of a denominator that flattered it.**
+
+**The sentence "both trees remain ~99.7% vendored and decompiled material" is directionally right but overstated.** Against the 1,711 non-closure files, the vendored share is 1,607 of 1,711 = **93.9%**. The original 99.7% was computed against a denominator that included the dependency closures it was trying to exclude, which **counted them twice** — once as vendored material and once inside the total.
 
 ---
 

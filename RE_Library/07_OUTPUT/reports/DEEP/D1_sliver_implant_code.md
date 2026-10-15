@@ -754,6 +754,42 @@ The block is `MsgRegister = uint32(1 + iota)`, so **IDs are positional**. This i
 useful artifact in the report for anyone reading a Sliver binary or pcap: it converts a numeric
 message ID into a command name.
 
+> ### ⚠ THIS TABLE IS OFF BY ONE — CORRECTED ROUND 15, read this before using it
+>
+> **Every ID in the table below is exactly one lower than disk truth.** The table omits
+> `MsgRegister`, which is ID **1**, so `MsgTaskReq` is **2**, not 1, and `MsgExecuteChildrenReq` is
+> **136**, not 135. **The table has 136 rows of content, not 135.**
+>
+> **Measured independently by the Lead from `protobuf/sliverpb/constants.go`, iota block at
+> `:41`–`:361`:** 136 `Msg*` constants enumerated in document order —
+>
+> | ID | Constant | D1 below says |
+> |---:|---|---|
+> | **1** | `MsgRegister` | *row absent* |
+> | 2 | `MsgTaskReq` | 1 |
+> | 5 | `MsgLsReq` | 4 |
+> | 22 | `MsgTunnelData` | 21 |
+> | 32 | `MsgInvokeGetSystemReq` | 31 |
+> | 64 | `MsgMakeTokenReq` | 63 |
+> | 93 | `MsgBeaconRegister` | 92 |
+> | 95 | `MsgOpenSession` | 94 |
+> | 135 | `MsgShellResizeReq` | 134 |
+> | **136** | `MsgExecuteChildrenReq` | 135 |
+>
+> **Reading the table as published will misname every message ID by one position.** ID 22 reads as
+> `MsgTunnelData` below and is `MsgTunnelClose` on disk; ID 93 reads as `MsgBeaconRegister` below and
+> is `MsgBeaconTasks` on disk — **a misidentification of an implant-internal message as an
+> operator-visible one.** Found by havoc-deep (task-27 / D15 §2), verified independently by the Lead.
+>
+> **Root cause, and it is visible in this very section:** `:807-808` of this report states
+> *"`MsgRegister = 1` is the very first constant"* — **the author knew the mapping and then omitted
+> that row from the table.** The prose and the table disagree, 5 lines apart. A reader who trusted the
+> table over the sentence got the wrong answer, and the sentence was right.
+>
+> **The table's rows below are left unmodified rather than silently renumbered**, so that any citation
+> to a row already in the wild still resolves to the same displayed text. **Apply −1 → disk, or
+> +1 → as-published.** See D15 §2 for the full verification.
+
 | ID | Constant | ID | Constant | ID | Constant |
 |---|---|---|---|---|---|
 | 1 | MsgTaskReq | 46 | MsgScreenshotReq | 91 | MsgListExtensionsReq |
@@ -810,6 +846,27 @@ constant and is the initial implant→server metadata frame.
 **Reconciliation with T1:** T1 established there are **135 unique RPC request types** in the
 client binary. This table is the *implant-side* counterpart and also totals 135 — a clean
 independent confirmation of that count from a different artifact.
+
+> **⚠ THE CONFIRMATION ABOVE IS VOID — corrected round 15.**
+>
+> It confirmed 135 by counting a table that has **136 rows of content**. `MsgRegister` (ID 1) was
+> omitted from the table, so the implant side totals **136** and this paragraph's "also totals 135"
+> is a restatement of the omission, not an independent agreement.
+>
+> **The trap is exact and worth naming:** the "confirmation" was never independent of the table it
+> confirmed. **Two numbers that agree because one was derived from the other are one measurement
+> reported twice.** The table was built with `MsgRegister` dropped; the total was then read off the
+> table; the total was compared to T1's count and found equal. **Nothing in that chain re-examined
+> the physical constant list** — so an error introduced at the table's construction was laundered
+> into apparent corroboration.
+>
+> **What is established: the two counts are not equal.** Whether T1's client-side 135 is itself
+> correct is a **separate question, outside this report's scope** — T1 counted a different artifact
+> and has not been re-measured. **This report does not claim T1 is wrong, only that T1 was never
+> confirmed by this.**
+>
+> Verified independently by the Lead against `protobuf/sliverpb/constants.go:41-361`; full working in
+> D15 §2.
 
 ### 6.4 Filesystem handler surface (`handlers.go`) — 38 functions, exact lines
 
@@ -2256,6 +2313,28 @@ independent subsystems**, not an inference from one file.
 ---
 
 ## 17. Status
+
+> **⚠ STALE — REWRITTEN ROUND 15. The list below describes a state this file has moved past.**
+>
+> This block was written when §0–§16 existed. **§18–§24 have since been appended below it** and §17
+> was never updated, so it now sits above six sections it does not mention. Specifically:
+>
+> | §17 says "Remaining" | actual state |
+> |---|---|
+> | server (408 files) | **§18 CA, §19 `GenerateConfig`, §20 sRDI** — server half covered |
+> | `shell/` | **§15** `taskrunner/task_windows.go` (534 lines) |
+> | `proxy/` | **§11** `transports/pivotclients/pivotclient.go` (413 lines) |
+> | vendor enumeration beyond reflektor | **§16** closed as vendored |
+> | *(not listed)* | **§21 traffic encoders, §22 session handler, §23 replay/crypto, §24 contrast** |
+>
+> **The one item that was genuinely still open and is now closed elsewhere:**
+> `implant/sliver/handlers/` (**44 `.go` / 332 KB, the largest unread block in the target**) was never
+> named in this list at all. It is **task-27 / D15**, delivered separately.
+> **The 135-entry message-ID table in §6.3 was off by one and is corrected inline in §6.3** — the
+> count is **136**. §17's own line 2 above repeats the stale 135.
+>
+> **§17 is left in place rather than deleted** so that any citation to it resolves to the correction
+> rather than to nothing. The six sections below are authoritative.
 
 Sections complete: §0 correction, §1 crypto perimeter, §2 inventory, §3 transports, §4 framing and
 tunnel admission, §5 HTTP transport + WinINet, §6 handler dispatch + the 135-entry message-ID table,

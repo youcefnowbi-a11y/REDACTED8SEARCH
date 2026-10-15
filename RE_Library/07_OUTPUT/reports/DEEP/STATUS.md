@@ -3,39 +3,48 @@
 Function-by-function reversal of every target in the corpus. Written incrementally; this file is
 the board, the report files are the deliverables.
 
-**Last verified (round 15, measured): 1,949.1 KB across 23 files.** Prior header said 1,755.2 KB /
-19 files at round 14; the delta is `D13_covenant_api_control_plane.md` completing (1,768 → 79,666 B),
-`D12_havoc_dispatch.md` and `D14_pupy_vidcap_native.md` landing, `D11_merlin_binaries.md` growing
-(20,720 → 33,396 B), and `D17_cross_target_synthesis.md` being written. Counted by
-`Get-ChildItem -Filter *.md` on `07_OUTPUT\reports\DEEP\`; the figure includes `STATUS.md` itself.
+**Last verified (round 16, measured): 2,102.3 KB across 24 files.** Prior header said 1,949.1 KB / 23
+files at round 15; the delta is `D15_sliver_implant_handlers.md` landing (new, 58,604 B),
+`D11_merlin_binaries.md` closing (33,396 → 47,878 B), `D13_covenant_api_control_plane.md` §8 appending
+(79,666 → 96,342 B), `D14_pupy_vidcap_native.md` growing (29,122 → 52,512 B), `D18_merlin`→`D18_mythic`
+landing (new, 9,287 B), and D1/D3/D17 corrections. **The header figure includes `STATUS.md` itself.**
+Counted by `Get-ChildItem -Filter *.md` on `07_OUTPUT\reports\DEEP\`, every row below re-measured this
+round rather than carried.
+
+**Round-16 delta on existing files, and two of them are corrections rather than additions:**
+| file | was | now |
+|---|---:|---:|
+| `D1_sliver_implant_code.md` | 167,607 | **172,244** |
+| `D3_android_code.md` | 69,590 | **79,478** |
+| `D17_cross_target_synthesis.md` | 33,829 | **41,554** |
 
 | file | bytes | lines | `##` |
 |---|---:|---:|---:|
-| D1_sliver_implant_code.md | 167,607 | 3,251 | 31 |
+| D1_sliver_implant_code.md | 172,244 | 3,330 | 31 |
 | D2_covenant_code.md | 195,734 | 2,529 | 19 |
-| D3_android_code.md | 69,590 | 790 | 13 |
+| D3_android_code.md | 79,478 | 867 | 13 |
 | D4_mythic_code.md | 77,300 | 1,133 | 15 |
 | D5_havoc_code.md | 243,155 | 2,851 | 15 |
 | D6_pupy_code.md | 346,283 | 5,272 | 27 |
 | D7_metasploit_code.md | 106,203 | 1,415 | 15 |
-| D8_msf_exploit_side.md | 50,353 | 682 | 11 |
+| D8_msf_exploit_side.md | 50,353 | 682 | 9 |
 | D9_msf_core_library.md | 158,915 | 1,512 | 18 |
 | D10_merlin.md | 77,973 | 981 | 8 |
-| D11_sliver_rpc_core.md | 62,167 | 641 | 15 |
 | D11_havoc_native_win32.md | 60,382 | 1,141 | 9 |
+| D11_merlin_binaries.md | 47,878 | 682 | 9 |
 | D11_mythic_crypto_postresponse.md | 34,561 | 417 | 10 |
 | D11_pupy_transport_crypto.md | 38,761 | 517 | 11 |
-| D11_merlin_binaries.md | 33,396 | 487 | — |
-| D12_sliver_aitools.md | 30,483 | 313 | 14 |
+| D11_sliver_rpc_core.md | 62,167 | 641 | 15 |
 | D12_havoc_dispatch.md | 25,698 | 382 | 11 |
-| D13_covenant_api_control_plane.md | 79,666 | 1,036 | 9 |
-| D14_pupy_vidcap_native.md | 29,122 | 457 | — |
-| D17_cross_target_synthesis.md | 21,076 | 347 | — |
-| CROSSREF_AUDIT.md | 26,456 | 308 | 21 |
-| STATUS.md | (this file) | | |
+| D12_sliver_aitools.md | 30,483 | 313 | 15 |
+| D13_covenant_api_control_plane.md | 96,342 | 1,233 | 10 |
+| D14_pupy_vidcap_native.md | 52,512 | 775 | 18 |
+| D15_sliver_implant_handlers.md | 58,604 | 910 | 12 |
+| D17_cross_target_synthesis.md | 41,554 | 662 | 12 |
+| D18_mythic_opsec_post_response.md | 9,287 | 106 | 7 |
+| CROSSREF_AUDIT.md | 26,456 | 308 | 10 |
+| STATUS.md | 60,389 | 896 | 18 |
 
-`D13` had just been created when this stamp was taken; `D11_merlin_binaries` is still growing under
-the Ghidra lane. Sizes are a snapshot, not a completion claim.
 
 ## Round 14 — THE INSTRUMENT RULE (corpus-level)
 
@@ -554,6 +563,339 @@ system working.
   displayed line number was one too high. **The verification pass was the error, not the catch** —
   strictly worse than not rechecking, because it replaced a correct citation while wearing the
   authority of an audit.
+
+## Round 16 — D15, D11_merlin closed, and two new instrument classes
+
+### D1 §6.3 WAS WRONG BY ONE — AND ITS OWN VERIFICATION CLAIM WAS VOID
+
+**The corpus's reference artifact carried a live defect.** D1 §6.3 published the Sliver message-ID
+table as **135 IDs beginning `MsgTaskReq = 1`**. Disk truth, enumerated by the Lead from
+`protobuf/sliverpb/constants.go:41-361`: **136 constants, IDs 1–136 contiguous, ID 1 = `MsgRegister`,
+ID 2 = `MsgTaskReq`, ID 136 = `MsgExecuteChildrenReq`.**
+
+**D1's table omits `MsgRegister` and is therefore uniformly one low across all 135 rows.** A reader
+using it on a pcap names the wrong command for every ID: ID 22 reads `MsgTunnelData` and is
+`MsgTunnelClose`; ID 93 reads `MsgBeaconRegister` and is `MsgBeaconTasks` — **an implant-internal
+message misidentified as an operator-visible one.**
+
+Found by havoc-deep (D15 §2), verified independently by the Lead. **Both corrections are now inline in
+D1** (§6.3 carries the correction above the unchanged table; §17 carries a staleness banner).
+
+**Root cause visible in the source document:** D1 `:807-808` states *"`MsgRegister = 1` is the very
+first constant"* — **the author knew the mapping and then omitted that row from the table.** The prose
+and the table disagree five lines apart, and the prose was right.
+
+#### The verification claim that died with it, and it is a NEW instrument class
+
+D1 `:810-812` claimed its 135 **independently confirmed** T1's count of 135 unique RPC request types.
+
+> **The "confirmation" was never independent of the table it confirmed.** The table was built with
+> `MsgRegister` dropped; the total was read off that table; the total was compared to T1 and found
+> equal. **Nothing in the chain re-examined the physical constant list.** An error introduced at the
+> table's construction was laundered into apparent corroboration.
+
+**This is the instrument rule's THIRD variant, and it is distinct from the first two:**
+
+| variant | failure | detectable by |
+|---|---|---|
+| 1 | the **tool** returns nothing | control the probe on a known-present target |
+| 2 | the **figure** arrived by a route other than the one claimed | state the producing run and its scope |
+| **3** | **two figures agree because one was derived from the other** | **check that the second measurement never touched the first's input** |
+
+**Variant 3 is the most dangerous of the three**, because agreement between two numbers *reads as
+corroboration* and is the thing analysts are taught to treat as strength. **A derived figure cross-
+checked against its own source is one measurement reported twice, and it will always agree.**
+
+**Rule: a corroborating count must be traceable to an input that the first count did not touch.**
+
+### D17 — THE CROSS-TARGET SYNTHESIS, AND ITS §4b CONVERGENCE
+
+`D17_cross_target_synthesis.md` written (21,076 → 33,829 B). The one artifact no single lane can
+produce, because it requires every lane's output.
+
+**§4b is the corpus's strongest result: three lanes, three frameworks, no coordination, one pattern.**
+
+| framework | primary path | gated? | **alternate path to the SAME capability** | gated? |
+|---|---|---|---|---|
+| **Sliver** | 201-RPC gRPC API | yes | `aitools` in-process executor (`*rpc.Server` as `Backend`) | **NO** |
+| **Covenant** | `POST api/listeners` | yes | `CovenantHub.CreateHttpListener` at `/covenanthub` | **NO** |
+| **Havoc** | `SysNt*` indirect wrappers | yes | direct `NtSetEvent` import at `Win32.c:1296` | **NO** |
+
+> **A control holds on the primary path and lapses on the alternate path to the same capability. The
+> control is not wrong — the alternate path was never in its scope.**
+
+Three different mechanisms (an interceptor cannot see a Go method call; a controller attribute cannot
+reach a SignalR hub method; a wrapper need not be used by a raw import). **In none of the three was the
+alternate path built to bypass anything.** Each exists for a legitimate unrelated reason — **which is
+why a review looking for bypasses would miss all three.**
+
+**Mechanism, supplied by covenant-diver:** *the control lived in exactly one place, and the alternate
+path was never that place.* **Do NOT over-claim it:** §4b.2 records that this is not "these frameworks
+skip authorization." Covenant enforces it on **all 183 AutoRest operations across 17/17 controllers**;
+Havoc wires 34 of 35 syscalls. **A comparison saying "Covenant gates its API" is correct and misses the
+entire finding.**
+
+### D15 — SLIVER IMPLANT HANDLERS (task-27, COMPLETE)
+
+`D15_sliver_implant_handlers.md` — **58,604 B / 910 lines / 11 sections / 85 `[source:]` tags.**
+
+**The brief's premise was half wrong and the lane reported that as its lead finding.** D1 was *not*
+silent on capability — §6.2 enumerates 51 Windows bindings and §6.3 carries the ID table. But D1 lists
+handlers **by name with no ID mapping, never touches linux/darwin/generic, and never enumerates
+tunnel/pivot/rportfwd/kill.** D15 built the ID→function mapping across **nine maps instead of one.**
+
+**Measured:** 136 constants / **9 maps** (D1 said seven) / 187 entries / 85 distinct bound / 51 unbound
+/ **0 orphans** / 0 live commands without an implementation. Windows map holds **65 entries, not 51.**
+All headline numbers recomputed by a second independent method.
+
+**The finding that inverts Havoc.** D12's Havoc danger was a dispatch loop with **no default branch** —
+unknown command silently dropped, no error to the operator. **Sliver is the opposite:**
+`runner.go:729-740` has a final `else` sending `Envelope{UnknownMessageType: true}` back indexed by
+request ID. **The server can distinguish "unimplemented" from "failed" from "silent."** Sliver's
+*local* logging is worse than Havoc's (the `log.Printf` sits inside `{{if .Config.Debug}}` — **169 such
+guards, compiled out of release builds**), but the protocol signal is always sent. **Two independent
+design choices, and Sliver made the better one on the axis that matters.**
+
+**`MsgRPortfwdReq` is a STALE CONSTANT, not a severance — the same verdict as D12's `COMMAND_PS_IMPORT`,
+reached independently by a different lane on a different framework.** Registered with protobuf type, ID
+and name resolver, and exactly **two references in the tree, both its own definition.** Positive
+control: its neighbours `MsgRPortfwdStartListenerReq`/`Stop` are bound *and* sent. **Nothing sends it,
+so nothing is armed.**
+
+**Execution split is architectural, not stylistic:** `execute-assembly` takes `Process`/`PPid`
+(sacrificial) with **no** evasion flags; in-process takes `Runtime`/`AmsiBypass`/`EtwBypass` and **no**
+process. **AMSI bypass is in-process-only by construction** (`patch := byte(0xC3)` at
+`task_windows.go:212`). **`syscalls/` is misleadingly named** — entirely `mkwinsyscall`-generated
+`kernel32` bindings, **zero SSN resolution.** Injection is unhardened: `VirtualAllocEx` →
+`WriteProcessMemory` → `CreateRemoteThread`, no unhooking; **`QueueUserAPC` is declared but never
+called — early-bird APC is not implemented.**
+
+### D11_merlin_binaries CLOSED (task-21) — three of four tasking questions corrected
+
+**47,878 B / 682 lines / §0–§7.** Server binary analyzed for the first time.
+
+- **D10 residual R-1 CLOSED — by WITHDRAWAL, not resolution.** The loader does not resolve
+  `SourceRemote` vs `SourceLocal` **because no resolution exists.** Both are **protobuf fields on
+  `rpc.Module`** (`SourceLocal` `bytes,16,rep`; `SourceRemote` `bytes,15,opt`) reached only through
+  generated getters — **no branch by construction.** `NewModule` (`0x14061e6e0`) makes exactly two map
+  accesses, keys read byte-for-byte as `"base"` and `"powershell"`. `validateModule` (`0x14061f4c0`)
+  validates platform and arch only. `pkg/modules` is exactly 5 functions, **all 5 read** — independent
+  confirmation of D10. **`local`/`remote` describe where an operator can obtain payload bytes, not a
+  server fetch strategy.** → **D10's R-1 is marked resolved-by-withdrawal, not carried forward.**
+- **The COM premise does not hold.** `DllInstall`, `DllRegisterServer`, `DllUnregisterServer` **and
+  `VoidFunc`** all compile to the **identical body** `main_run(main_url, …)` — zero registry writes,
+  zero COM, zero `DllGetClassObject`. **Seven export names, ONE action.** The genuinely distinct
+  invocation primitive is **`Run`**, parsing the literal `"rundll32"` (immediate `0x32336c6c646e7572`)
+  from `os.Args[1]`.
+- **7 exports, no eighth.** Contiguous `0x40` stride; `.def` and shipped binary agree.
+- **Q4 — empty function-table diff, same program.** 3 bytes differ (linker `MajorLinkerVersion` 2→3).
+  All 80 `.text` deltas are **RIP-relative `disp32` operands reduced by exactly `0x10`**, with borrow
+  propagation on the three non-uniform bytes. **Arithmetic closes exactly: 59,410 vs 59,408 reloc
+  entries = −2 × 2 B = the 4-byte VirtualSize delta.** The "Debug" agent has `NumberOfSymbols = 0` —
+  **it is not a symbol build and is worthless as a recovery route.**
+
+**Structural finding neither tasking nor D10 anticipated:** **the server carries full DWARF and a
+1.65 MB `.symtab` while the agent is `-s -w` stripped.** The release workflow strips the artifact that
+gets dropped on a target and leaves the operator-side binary diagnosable. **That asymmetry is why Q1
+was answerable by name lookup at all** — and it means the DLL and server are the only Merlin binaries
+where symbol recovery is possible.
+
+**In-lane near-miss, recorded in §7.3:** two map-key addresses were **guessed rather than read**,
+returning unrelated neighbour text (`"base at Has of "`). Caught because the decoded string obviously
+wasn't a key, then re-derived from the spilled pseudocode. **Same shape as havoc-deep's `DEMON_COMMAND_`
+prefix error: the instrument worked, the assumed input was wrong.** A wrong constant that decodes to
+plausible text can survive.
+
+### THE DENOMINATOR CLASS — variant 3's sibling, found by a lane auditing itself
+
+android-diver turned the §1.0 probe on **its own delivered report** and D3 §10.1 was wrong.
+**Lead-verified:**
+
+| ahmyth subtree | files | bytes |
+|---|---:|---:|
+| `AhMyth-Server\app\node_modules` | **7,911** | **124,076,770** |
+| everything else | 526 | 21,241,085 |
+| **total published as the D3 §10.1 denominator** | **8,437** | **145,317,855** |
+
+**`node_modules` is 93.8% of the file count / 85.4% of the bytes** of a denominator presented as the
+basis for a **first-party vs vendored** split. The real first-party client is `AhMyth-Client`, **41
+files / 139,112 B**. AndroRAT separately: **2,479 of 4,008 files (61.9%), 27,388,229 B (50.4%)** are
+decompiled `.smali`. **§10.2/§10.3's first-party counts (12 Java / 19 Java) are separately enumerated
+and hold — it is the framing denominator and §10.5's ratios that were wrong.**
+
+**A report that named a split "first-party vs vendored" counted three vendored dependency closures
+into its own denominator** (`node_modules` 7,911; `okhttp3`+`io.socket` smali 385; AndroRAT smali
+2,479). **The three-level progression is now in D17 §1.0.1:**
+
+| level | what failed | what it looked like |
+|---|---|---|
+| 1 | **the probe** — a path filter excluded the tree | 16 clean zeros |
+| 2 | **the attribution** — 385 smali files called vendored | correct, once asked where they lived |
+| 3 | **the denominator** — 7,911 `node_modules` files counted as first-party-adjacent | **93.8% of a headline number** |
+
+> **At level 3 there is no probe to control and no zero to doubt.** The number was produced correctly,
+> by a working instrument, from the right tree — and it was wrong because **the boundary it measured
+> was drawn wrong.** The instrument rule covers tools that return nothing; **this covers a tool that
+> returns exactly the right answer to the wrong question**, which is undetectable from the output.
+> **"Enumerate your denominator" is a separate discipline from "control your probe."**
+
+### D17 RESIDUAL — A FALSE CLAIM THE LEAD WROTE ABOUT THE CORPUS, CORRECTED
+
+D17 §8 originally stated that `recv_pt_task_opsec_post_response.go` **"is in no report."**
+**False.** It is cited at **`T4_mythic.md:559`** as the `PT_TASK_OPSEC_POST_CHECK` consumer.
+Caught by android-diver, verified by the Lead against `T4:559`.
+
+**Accurate statement: "named but not read."** T4 names it **once**, as a `[source:]` citation for a
+queue name — a *naming*, not a *reading*. The file is 187 lines of readable Go containing
+`processPtTaskOPSECPostMessages`, the `PT_TASK_OPSEC_POST_CHECK_RESPONSE` direct-queue registration,
+and an error path firing `SendAllOperationsMessage` on a bad `TaskID`.
+
+**The error class: a claim about what the corpus knows about itself, made without checking the
+corpus.** Same shape as the retracted citation-count pattern — **the failure is not in the target, it
+is in the index.** D17 §8 item 4 now carries the correction and the class.
+
+### COVENANT — service-level negative, and a FOURTH disabled-channel artifact
+
+**covenant-diver enumerated `CovenantService.cs` (255,768 B / 5,138 lines) for the full negative set:**
+`[Authorize` 0, `[AllowAnonymous` 0, `RequireRole` 0, `HasPermission` 0, `HttpContext` 0,
+`RequireJwtBearer`/`RequireAdministratorRole` 0, `IAuthorizationService`/`AuthorizationPolicy` 0,
+`ClaimsPrincipal` 4, `IsInRole` 1, `IsAuthenticated` 1. **All hits resolve to exactly two methods D13
+already documents** — `GetCurrentUser` (L446-454, **a lookup that throws, not a check**) and
+`CreateUserVerify` (L481-487, D13 §2.9). Plus two interface declarations at L36/L38.
+
+**Positive control run properly:** same regex, `CovenantUserApiController.cs` = **8**, `Startup.cs` =
+**4**. `CovenantHub.cs` = **0** — independently re-confirming §4.1's zero-attribute claim.
+
+**This promotes D17 §4b.1's Covenant instance from attribute-level to service-level evidence**, and
+supplies §4b's general mechanism: *the control lived in exactly one place, and the hub path was never
+that place.*
+
+**FOURTH disabled-channel artifact:** `CovenantHubService.cs:698` invokes hub method `GetCurrentUser`
+whose hub-side counterpart is inside the `L166-1151` block comment — **dead.** The class issues **233
+`_connection.InvokeAsync` calls against a hub whose entire live surface is one method**, connects to
+`https://localhost:{CovenantPort}/covenantHub` with `ServiceUserToken`, and **carries a
+cert-validation callback returning `true` unconditionally at `:30-33`.** `Startup.cs:196` has the DI
+registration **commented out**. **Marked `[inference]`: dead-but-retained, not a live path.**
+
+**Covenant now has four of these:** (1) `CovenantHub` mapped bare; (2) the re-declared
+`RequireJwtBearer` policy at `HttpListener.cs:353-366` against a scheme the host never configures;
+(3) the 222 block-commented hub methods; (4) `CovenantHubService`, DI-registered-out with a
+stubbed-true certificate validator. **That is a pattern, not four incidents.**
+
+### THE SIX-FILE SQL PATTERN — and a lane caught three of its OWN numbers mid-correction
+
+**This is the strongest single finding of round 16 and it came from checking the smallest claim first.**
+`recv_pt_task_opsec_post_response.go:46` reads:
+
+```sql
+UPDATE apitokens SET deleted=true AND active=false WHERE task_id=$1
+```
+
+**`SET a=true AND b=false` is not two assignments** — SQL needs a comma, so it parses as
+`deleted = (true AND active=false)`. **`active` is never set.** android-diver wrote it up as an
+isolated typo, then ran one `Select-String` across the directory. **It is SIX files** (Lead-verified):
+
+`recv_pt_task_opsec_post_response.go:46` · `recv_pt_task_opsec_pre_response.go:41` ·
+`recv_pt_task_create_response.go:46` · `recv_pt_task_process_response.go:27` ·
+`recv_pt_payload_build_response.go:92` · `utils.go:796`
+
+**And the CORRECT comma form is in use in four sibling files for the identical statement** —
+`eventing.go:747`, `eventing.go:1595`, `check_container_status.go:219`, `initialize.go:177`.
+
+> **It is not "someone didn't know SQL." It is a wrong idiom duplicated five times while the right
+> one sits in a neighbouring file** — a searchable pattern, not a line to patch. Shipped as isolated,
+> the corpus would carry a one-file defect where a six-file pattern exists.
+
+**Verification boundary stated precisely:** the six sites and four controls are **verified**. Whether
+**MySQL accepts the malformed `SET` or errors** is **NOT verified** and was not run. **That decides the
+impact:** if it errors, the token is never invalidated and the error is swallowed; if accepted, `active`
+retains its old value. **Both worse than intended, and not the same defect.** Recorded as open.
+
+### ANDROID-DIVER CAUGHT THREE OF ITS OWN NUMBERS WHILE WRITING THE CORRECTION
+
+The D3 §10.1 fix was drafted with **three wrong figures**, all caught by **re-running the arithmetic
+before reporting instead of after**:
+
+| as first drafted | truth |
+|---|---|
+| class 2 `385 / 3,609,776` (included `okio`) | **344 / 3,042,701** |
+| non-dependency denominator `1,629 → 2.39%` | **1,711 → 2.28%** |
+| first-party coverage `67 files → 58.2%` | **104 files → 37.5%** |
+
+**The 58.2% would have flattered its own coverage by twenty points** — it had used
+`AhMyth-Client/app/src` (26 files) where the AndroRAT source tree is 63. **A correction that contains a
+flattering error is worse than the original defect.** The honest figure is **37.5%**, and the **65 unread
+first-party files are real** — the 42 non-Java files in `androrat/Android_Code` plus 15 outside
+`AhMyth-Client/app/src`. **Neither RAT's full manifest or build set was read**, now stated with a number
+instead of a denominator that hid it.
+
+### THE DENOMINATOR RULE, CORRECTED BY THE LANE THAT RAN IT
+
+I wrote the rule as **"enumerate your denominator."** android-diver's refinement, from having actually
+done it, **supersedes my phrasing:**
+
+> **I did enumerate it — correctly, from disk. What was wrong was the BOUNDARY of the set I chose to
+> enumerate: I enumerated under a path that contained dependencies. The rule that catches this is
+> "justify the boundary, not the count" — state why each subtree is IN scope before totalling.**
+
+**A correct count of a wrongly-bounded set is still wrong, and the count will look healthy.** The
+denominator is a **boundary decision**; the enumeration is arithmetic performed inside it. Stating
+exclusion classes *with sizes* makes the boundary auditable in a way a total never is.
+
+### COVENANT — THE FIFTH ARTIFACT, FOUND BY A DIFFERENT DETECTOR THAN THE ONE ASKED FOR
+
+**covenant-diver's §8 is appended; D13 now 96,342 B / 1,233 lines, re-closed at rev 6.**
+
+**Clean negative on the probe as posed:** `CovenantHub.cs` is the **only** file in the entire Covenant
+tree with a multi-line block comment (detector calibrated against both known spans before running
+tree-wide). Three commented-out `services.Add*` at `Startup.cs:196-198`, **two naming types that do not
+exist** (`CovenantBlazorService`, `SignalRCovenantService`) — tombstones for deleted classes.
+
+**The fifth artifact surfaced from a different detector — any class holding `TokenCredentials`:**
+`Core/CovenantAPIService.cs` (3,951 B / 95 lines), **live in DI** at `Startup.cs:194` — the line
+**immediately above** the three commented-out ones — authenticating with
+`configuration["ServiceUserToken"]`, implementing **real certificate pinning**
+(`cert.GetCertHashString() == covenantCert.GetCertHashString()`), better built than
+`CovenantHubService`'s `return true` stub, with **zero consumers: three references total, all
+declaration/registration.**
+
+> **It is the REVERSE of §4b's shape.** `CovenantHub.CreateHttpListener` is **reachable but ungated**.
+> `CovenantAPIService.CreateHttpListener` is **gated but unreachable.** D13 §8.3 tabulates all four
+> paths to `CreateHttpListener`; **path 2 (the hub) is the only one of the four with no gate.**
+
+**Marked `[inference]`, deliberately not promoted.** **The methodological point: an enumeration is only
+as complete as the detector's shape** — the comment-detector could not see this, and no amount of
+calibrating *that* detector would have found it.
+
+**§8.4 revises D13 §4.4 — the lane's own earlier conclusion, on itself.** The five artifacts are **one
+abandoned two-process topology dismantled asymmetrically**, not five incidents. `CovenantHubService` is
+literally `IRemoteCovenantService`, the remote impl of the operator service; **the hub was the server
+half of a deliberate Blazor → SignalR proxy → service split** that was abandoned. **`CovenantHub` is the
+surviving half, and the one method left live in it is a listener-creation entry point the abandonment
+never gated.** The live/comment boundary at `L161/162` is where the author stopped commenting.
+**A report that stopped at "the hub has no `[Authorize]`" would have been correct and would have
+described a mistake. What is there is the remains of a design.**
+
+#### A retracted number surviving in a HEADER — the sharpest instance of this class yet
+
+D13's **line 10** — the first thing a reader sees — still read **"18 of 18 API controllers"** (it is
+**17 of 17**) and **"~230 callable methods"** — **the exact error §4.0 exists to correct.** §7's summary
+had inherited the 18-of-18 figure too. Both fixed; the header now carries the §4.0 correction explicitly
+rather than burying it.
+
+> **A retracted number surviving in the header is worse than the original error**, because the header is
+> what gets read when the body does not. This is the **corpus-vs-index** class again: the correction was
+> made in the body and never propagated to the document's own summary of itself.
+
+### PLACEMENT DEFECT CAUGHT BY THE LEAD — a correct file in a gitignored directory
+
+android-diver wrote the Mythic 187-line read to
+`07_OUTPUT\extractions\DEEP\D10\mythic_opsec_post_read.md`. **`extractions/` is gitignored**
+(`.gitignore:23`), so **the note would never have shipped** — a complete, correct deliverable rendered
+invisible by its location. **Relocated to `07_OUTPUT\reports\DEEP\D18_mythic_opsec_post_response.md`**
+(9,287 B / 106 lines) and verified tracked-able. **This is the `.gitignore` lesson in the other
+direction:** the earlier failure was rules that matched nothing; this one was a file that matched a
+rule. **A deliverable's location is part of its correctness.**
 
 ## Platform note
 

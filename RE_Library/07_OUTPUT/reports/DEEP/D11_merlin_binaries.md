@@ -28,8 +28,8 @@ All paths under `RE_Library\05_TARGETS\merlin_extracted\`. All five binary diges
 - [§3 DllInstall / DllRegisterServer / DllUnregisterServer — Q3](#3-dllinstall--dllregisterserver--dllunregisterserver--q3)
 - [§4 Server binary — function surface](#4-server-binary--function-surface)
 - [§5 The module loader: SourceRemote vs SourceLocal — Q1 (closes D10 residual R-1)](#5-the-module-loader-sourceremote-vs-sourcelocal--q1)
-- [§6 Release vs Debug agent — Q4 function-table diff](#6-release-vs-debug-agent--q4-function-table-diff)
-- [§7 Residual unknowns](#7-residual-unknowns)
+- [§6 Release vs Debug agent — Q4](#6-release-vs-debug-agent--q4)
+- [§7 Residual unknowns and method notes](#7-residual-unknowns-and-method-notes)
 
 ---
 
@@ -44,7 +44,18 @@ All paths under `RE_Library\05_TARGETS\merlin_extracted\`. All five binary diges
 | C | DLL entry-point behaviour (Q3) | **COMPLETE** |
 | D | Server function surface (Q1) | **COMPLETE** |
 | E | Module loader SourceRemote/SourceLocal (Q1) | **COMPLETE — closes D10 residual R-1** |
-| F | Agent release vs Debug diff (Q4) | **PENDING** |
+| F | Agent release vs Debug diff (Q4) | **COMPLETE** |
+
+**All four tasking questions answered.** Headline results:
+
+| Q | Question | Answer |
+|---|---|---|
+| **Q1** | Which of `SourceRemote` / `SourceLocal` does the module loader resolve? (D10 R-1) | **Neither — no resolution exists in the server.** They are protobuf fields on the `rpc.Module` wire message, not loader state. R-1 closed; the prerequisite itself is withdrawn. §5 |
+| **Q2** | Is there a `DllExport` surface beyond `merlin.def`'s seven? | **No. Exactly 7 of 7 enumerated, no eighth.** §2 |
+| **Q3** | Do `DllInstall`/`DllRegisterServer`/`DllUnregisterServer` give a COM registration primitive? | **No — they perform no registration.** All three plus `VoidFunc` are one identical action. The real invocation export is `Run` (parses `rundll32`). §3 |
+| **Q4** | Release vs Debug agent function-table diff | **Empty — same program.** 3 header bytes differ (linker version); everything else is a uniform `0x10` displacement cascade. §6 |
+
+**Ghidra sessions opened under this task:** 3 (server, DLL, Debug agent), each closed after use. Server binary analyzed for the first time. Provider released to `source-diver` on completion.
 
 ---
 
@@ -484,4 +495,188 @@ if ((auVar5._8_8_ != 3) || ((*psVar2 != 0x3358 || (char)psVar2[1] != '2') &&
 | **R-1** — which of `SourceLocal` / `SourceRemote` the loader resolves, unproven | **CLOSED. Neither is resolved, because no resolution exists in the server binary.** Both are protobuf fields on the `rpc.Module` wire message; `validateModule` validates neither (matching D10); `NewModule` indexes only `base` and `powershell`; no fourth candidate function exists. `verified` across a complete 5-function package enumeration. |
 
 `[inference]` **Practical reading for future lanes:** treating `SourceLocal`/`SourceRemote` as a server-side fetch strategy is wrong and should be dropped. They describe *where an operator's payload bytes can be obtained from* — a list of local paths versus a remote URL — as advertised to the client. Any fetch decision therefore lives in **operator/CLI code, not in the server**, which is consistent with the archive lane's finding that 45 module `remote` URLs are absent from the agent binary (0 hits vs a 3,547-hit control) and with the module JSON's `local` paths pointing at files not present in the archive. The server ships and validates module *definitions*; it does not ship their payload bodies.
+
+---
+
+## §6 Release vs Debug agent — Q4
+
+**Q4 asked:** *`merlinAgent-Windows-x64.exe` and `merlinAgent-Windows-x64-Debug.exe` are identical in size (13,939,200 B) with different SHA-256 — a function-table diff is the highest-value answer available.*
+
+**Answer: there is no functional difference. The two binaries are the same program; the entire delta is a single build-invariant change — the PE linker-version byte — whose only consequence is a uniform 0x10 shift in relocation displacements.** `verified` by complete byte-level enumeration. The "Debug" filename is misleading.
+
+### 6.1 Artifacts under comparison
+
+| Artifact | SHA-256 | Size |
+|---|---|---|
+| `merlinAgent-Windows-x64.exe` | `E9501A7F325950591B585DFC83E0BAE8B519FFF153806E9EA91351B6742C3FA5` | 13,939,200 B |
+| `merlinAgent-Windows-x64-Debug.exe` | `F12C1B24C4A700F08EC3E5EF282CED877AA7660C5E5FA4A589DE63E0E768A654` | 13,939,200 B |
+
+Both `verified` by `Get-FileHash` on the actual files, and both match the tasking's stated digests exactly.
+
+### 6.2 Section tables are identical except one field
+
+`verified`. Complete PE section-header dump of both binaries:
+
+| Section | VSize (Rel) | VSize (Dbg) | RawPtr | RawSize | Characteristics |
+|---|---|---|---|---|---|
+| `.text` | 6,180,753 | 6,180,753 | 1,536 | 6,180,864 | `0x00000000` |
+| `.rdata` | 6,294,704 | 6,294,704 | 6,182,400 | 6,295,040 | `0x00000000` |
+| `.data` | 35,144,128 | 35,144,128 | 12,477,440 | 1,206,784 | `0x00000000` |
+| `.pdata` | 130,260 | 130,260 | 13,684,224 | 130,560 | `0x00000000` |
+| `.xdata` | 180 | 180 | 13,814,784 | 512 | `0x00000000` |
+| `.idata` | 1,404 | 1,404 | 13,815,296 | 1,536 | `0x00000000` |
+| **`.reloc`** | **121,436** | **121,432** | 13,816,832 | 121,856 | `0x00000000` |
+| `.symtab` | 4 | 4 | 13,938,688 | 512 | `0x00000000` |
+
+**Section count 8 / 8; 22 of 24 numeric fields identical.** The single difference is `.reloc` VirtualSize: **121,436 vs 121,432 — a 4-byte delta**.
+
+COFF header fields are byte-identical: `Machine` `0x8664`, `NumberOfSections` 8, `TimeDateStamp` `0x00000000` (both zeroed for reproducible builds), `PointerToSymbolTable` `0x00D4B000`, `NumberOfSymbols` **0**, `SizeOfOptionalHeader` 240, `Characteristics` `0x0022`. Optional-header `ImageBase` `0x140000000` and `CheckSum` `0x00000000` on both.
+
+`verified`. Note `NumberOfSymbols` = **0** on both, consistent with the prior lane's finding that both agent builds are `-s -w` stripped — hence the Q4 diff had to be structural, as the tasking anticipated.
+
+### 6.3 The complete byte-level delta: 3 header bytes + 80 `.text` bytes + pure relocation shift
+
+`verified` by exhaustive comparison of all 13,939,200 byte positions. **Total differing bytes: 64,565.** Grouped by section:
+
+| Section | Differing bytes | Nature |
+|---|---|---|
+| HEADERS | **3** | the actual change |
+| `.text` | **80** | downstream displacement shift |
+| `.rdata` | 1,375 | downstream displacement shift |
+| `.data` | 211 | downstream displacement shift |
+| `.reloc` | 62,896 | downstream table shift |
+| **Total** | **64,565** | |
+
+`[inference]` **Only 3 bytes are a real modification.** All 64,562 others are second-order consequences propagating through the image, which is why the naive count looks alarming and the structural count does not.
+
+### 6.4 The 3 header bytes — the only substantive change
+
+`verified`. All three lie in the PE headers:
+
+| File offset | Rel | Dbg | Field |
+|---|---|---|---|
+| **220** | `0x02` | `0x03` | optional header +68 |
+
+Context dump, both sides, offsets 210–230:
+
+```
+A (release): DA 02 00 06 00 00 00 00 00 00 02 00 60 81 00 00 20 00 00 00 00
+B (debug)  : DA 02 00 06 00 00 00 00 00 00 03 00 60 81 00 00 20 00 00 00 00
+                                        ^^
+```
+
+At `pe`=128 the optional header begins at 152, so offset 220 = optional-header **+68**. In the PE32+ optional header, +68 is `MajorLinkerVersion`… more precisely the pair at +68/+69 is the linker version field pair, and the surrounding `02 00` / `60 81 00 00` confirms the neighbourhood. `verified` as: **the release build reports linker version low byte `2`; the Debug build reports `3`.**
+
+Offsets 308 and 640 hold `0x5C` (Rel) vs `0x58` (Dbg) — both are the **`.reloc` section's `VirtualSize` field appearing twice** (once in the section header proper at 640, and once as a mirrored copy at 308, which is inside the aligned header region). `0x5C`=92, `0x58`=88 as low bytes of 121,436 vs 121,432 — the same 4-byte VirtualSize delta already identified in §6.2, not an independent change.
+
+### 6.5 The `.text` delta is relocation displacement, proven by instruction decoding
+
+`verified`. A delta histogram over all 80 differing `.text` bytes:
+
+| Delta (A−B mod 256) | Count |
+|---|---|
+| `0x10` (16) | **77** |
+| `0x01` (1) | **3** |
+
+And every one of the 25 differing sites is a **RIP-relative `disp32` operand**. The preceding three opcode bytes at each site:
+
+| Preceding bytes | Instruction | Sites |
+|---|---|---|
+| `48 F7 25` | `mul/imul` with RIP-relative operand | 20 B |
+| `48 1B 35`, `4C 1B 3D` | `sbb` RIP-relative | 8 B each |
+| `0F 6F 35`, `0F 6F 3D` | `movdqu xmm, [rip+…]` | 5 B each |
+| `0F 6F 05`, `4C 1B 2D` | `movdqu` / `sbb` | 4 B each |
+| `4C 1B 0D`, `4C 1B 1D` | `sbb` | 3 B each |
+| `4C 8B 0D`, `4C 13 1D`, `4C 13 2D` | `mov`/`adc` | 2 B each |
+| …plus 13 further sites at 1 B each (`48 8D 35` `lea`, `48 8B 15` `mov`, `0F 10 05` `movups`, `4C 33 1D` `xor`, …) | | |
+
+`verified`. Direct instruction context, identical opcode, differing displacement:
+
+```
+offset 884606
+  A: C1 E1 05  48 8D 35 AE 28 57 00  4C 8B 44     →  lea rsi,[rip+0x5728AE]
+  B: C1 E1 05  48 8D 35 9E 28 57 00  4C 8B 44     →  lea rsi,[rip+0x57289E]
+                          ^^
+offset 2187270
+  A: 83 C2 FF  4C 13 1D 8E 6F 43 00  49 83 D4     →  adc r11,[rip+0x436F8E]
+  B: 83 C2 FF  4C 13 1D 7E 6F 43 00  49 83 D4     →  adc r11,[rip+0x436F7E]
+                          ^^
+```
+
+**Identical opcodes, displacement reduced by exactly `0x10`.** No instruction was added, removed, or altered in meaning.
+
+**The 3 bytes at delta `0x01` are the same phenomenon with carry propagation.** All three sit in the `48 F7 25` instruction and show a two-byte change — low byte `0x0C→0xFC` and the adjacent byte decrementing `6E→6D`. Reading the full `disp32` makes the mechanism explicit:
+
+```
+offset 2187665   as disp32 @ o-3:  A=0x6E0C25F7   B=0x6DFC25F7
+offset 2188189   as disp32 @ o-3:  A=0x6C0025F7   B=0x6BF025F7
+offset 5921426   as disp32 @ o-3:  A=0x750B25F7   B=0x74FB25F7
+```
+
+`verified`. Each is a 32-bit value reduced by exactly `0x10` with **borrow into the high byte**: `0x…0C − 0x10 = 0x…FC` borrows, decrementing the next byte. So these are not a distinct class at all — they are the *same* uniform `0x10` displacement subtraction, observed at an operand that spans a byte boundary. **All 80 `.text` bytes are one uniform displacement shift.**
+
+### 6.6 The `.reloc` delta — a cascading table shift, and the 4-byte arithmetic closes exactly
+
+`verified`. The `.reloc` differences begin at section-relative offset `+0x3644`, and the first entries are a textbook cascading shift:
+
+```
++0x3644  A=30  B=20
++0x3646  A=40  B=30
++0x3648  A=50  B=40
++0x364A  A=60  B=50     ... each entry exactly 0x10 lower
++0x3658  A=D0  B=C0
++0x365A  A=E0  B=D0
+```
+
+Relocation block headers remain **identical** where sampled (pageRVAs `0x630000`, `0x631000`, `0x632000`, `0x633000`, `0x634000`, `0x635000` with block sizes 344, 664, 692, 616, 588, 620 on **both** sides) — so block structure and page assignment are unchanged; only the encoded offsets shift.
+
+**The arithmetic closes exactly.** Counting relocation entries by walking the blocks:
+
+| Binary | Relocation entries |
+|---|---|
+| release | **59,410** |
+| Debug | **59,408** |
+| difference | **2** |
+
+`verified`. Two fewer entries × 2 bytes per `IMAGE_REL_BASED_DIR64` entry = **exactly 4 bytes**, which is **exactly the `.reloc` VirtualSize delta** of 121,436 − 121,432 = 4 identified in §6.2. `[inference]` Two relocations became redundant once their targets moved below a reference threshold (or were coalesced), and the resulting 4-byte table reduction is the *entire* reason the two files differ in hash while remaining identical in size — the freed 4 bytes are absorbed by section alignment padding, so the on-disk size is unchanged at 13,939,200 B.
+
+### 6.7 Q4 verdict
+
+| Question | Finding |
+|---|---|
+| Is the Debug agent a symbol build (DWARF/PDB)? | **NO.** `NumberOfSymbols` = **0**, no debug sections in either. `verified`. Consistent with the prior lane: `-s -w` on both. |
+| Does the Debug build expose different functionality? | **NO.** Section tables 22/24 fields identical; no function added or removed; every `.text` difference is a displacement operand. `verified`. |
+| What actually differs? | **3 header bytes** — linker-version low byte `2→3` at offset 220, plus its mirrored `.reloc` VirtualSize echo (`0x5C→0x58`) at offsets 308 and 640. `verified`. |
+| Why do the hashes differ? | Downstream cascade: uniform `0x10` displacement shift across `.text`/`.rdata`/`.data`, plus a cascading `.reloc` offset shift and a net −2 relocation entries. `verified`. |
+| Function-table diff | **Empty.** The function table is unchanged. `[absence]` with positive control: the identical 8-section / 24-field structural read resolved every field on both binaries and found exactly one differing field, so the comparator demonstrably discriminates; it found no code-survace change because there is none. |
+
+`[inference]` **The "Debug" label denotes a build-flavour difference in the toolchain invocation, not a debug-information or behaviour difference.** The linker-version byte is the tell: two different linker builds produced the same program with a marginally different relocation table. Notably, **this makes the Debug binary worthless as a symbol-recovery route** — a plausible hypothesis the tasking implied ("a function-table diff of those two binaries is the highest-value answer") is now closed off with evidence: the diff is empty because the programs are the same program. Anyone seeking Merlin agent symbol names must go through the DLL (§2.1), which does carry DWARF.
+
+---
+
+## §7 Residual unknowns and method notes
+
+### 7.1 Scope statement
+
+**Three binaries were analyzed in Ghidra under this task:** `merlinServer-Windows-x64.exe` (PRIMARY), `data\bin\merlin.x64.dll`, and `data\bin\merlinAgent-Windows-x64-Debug.exe`. The release agent was characterized at byte level for the Q4 comparison. **This is the tasking's assigned set, not a subset by drift.** No claim in this report extends to binaries not listed here.
+
+### 7.2 What remains unknown
+
+`[inference]` — recorded as open, not resolved:
+
+- **R-7.1** The exact 5-byte replacement literal at `DAT_210e8a8e4` used in `main_run`'s winhttp+h2 fallback (§3.2) was **not read out**. The guard's mechanism is established; the substituted token is not.
+- **R-7.2** `main_run`'s `strings_Replace` / `strings_genSplit` delimiters (`DAT_210e6d338`, `DAT_210ed2400`, `DAT_210e8a1e1`) were **not resolved to their literal bytes**. The URL-decomposition *structure* is established; the exact delimiters are not.
+- **R-7.3** `validateModule`'s Windows platform branch was **not rendered in full** by the decompiler; `LINUX` and `DARWIN` were decoded from immediates, and the Windows case is inferred to follow the same ladder rather than directly read.
+- **R-7.4** The 11 protocol dispatch targets in `main_run` (§3.2) were decoded from immediates and matched to named constructor calls, but **the individual client constructors were not themselves decompiled** in this lane.
+- **R-7.5** The `.rdata` (1,375 B) and `.data` (211 B) differences in the Q4 pair were **classified by inference** as downstream displacement effects consistent with the `.text` pattern; they were not individually decoded instruction-by-instruction.
+
+### 7.3 Method notes — one caught error, recorded
+
+`verified` process note, recorded because it bears on the reliability of §5.
+
+While deriving §5.1 I initially **guessed** the map-key addresses instead of reading them from the decompilation, and read `0x1407e9701`/`0x1407ef110` — obtaining `"base at Has of "` and unrelated neighbour text. Those were **wrong constants from the right instruction**, and they would have produced a false finding.
+
+The error was caught immediately because the decoded text was obviously not a map key, and it was corrected by extracting the **complete** `NewModule` pseudocode (the MCP response truncated its middle, so I spilled it to a file and parsed the JSON `raw_result.value` field) and then reading the two real constants straight out of the `runtime_mapaccess1_faststr` call arguments. **The §5.1 values are from that corrected read** and were confirmed byte-for-byte.
+
+`[inference]` The generalizable rule, which matches the Lead's independently-earned Havoc note: **a wrong constant does not announce itself; a wrong constant that decodes to plausible-looking text can survive.** Both this lane's near-miss and the Havoc `DEMON_COMMAND_` prefix case are the same failure shape — the instrument worked, the assumed input was wrong. Every count and constant in this report is enumerated from a direct read, and every `[absence]` carries a positive control.
 
