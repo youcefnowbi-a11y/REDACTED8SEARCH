@@ -1432,3 +1432,82 @@ numeric claim needs the invocation.**
 
 **Consequence: the "Debug" build is the same program from a different linker revision — its SHA differs,
 its behaviour does not. That matters exactly once, for hash blocklists.**
+
+---
+
+## 14. The GIT TRANSPORT DEFECT — a false negative produced by a hung instrument, and how it was found
+
+**This is not an analysis finding. It is an instrument finding, it cost most of a round, and it belongs
+in the ledger because the failure mode is the corpus's own.**
+
+**Symptom:** `git push` never returned. `git ls-remote` returned **immediately.** Repeated pushes were
+killed at 8, 9, and 10 minutes with **zero bytes of output** and no error. The remote stayed at the
+previous commit while the local advanced.
+
+**The wrong diagnosis, reached twice, and by reasoning rather than measurement:**
+*"The push stalls while `ls-remote` works → it's a slow/hanging HTTP transport."* Two mitigations were
+applied on that basis — `http.version HTTP/1.1`, `http.postBuffer 524288000`, `http.lowSpeedLimit/Time` —
+**and both failed, because the hypothesis was never tested.**
+
+**A SECOND false negative, made by the Lead the same round and caught by the same discipline as the
+first:** the delta was measured as **`git rev-list --count origin/HEAD..HEAD` → 0 files, 0 commits** —
+read as *"there is nothing to push."* **`origin/HEAD` does not resolve in this repo**, so the range was
+empty and the instrument reported a clean zero. **Measured against the actual remote SHA it is
+`2 commits ahead / 13 files / ~0.8 MB.`**
+
+> **A count of 0 from an unresolvable reference is not a measurement of the delta, it is a measurement
+> of the reference.** This is instrument shape #11 reaching the git layer — **an empty answer from a
+> name that does not exist.** *The delta was never large; it was never measured.*
+
+**The actual fault, found by turning on `GIT_CURL_VERBOSE`:**
+
+```
+ALPN: server accepted http/1.1
+Established connection to github.com (140.82.121.4 port 443)
+GET /youcefnowbi-a11y/REDACTED8SEARCH.git/info/refs?service=git-receive-pack HTTP/1.1
+HTTP/1.1 401 Unauthorized
+Server: GitHub-Babel/3.0
+```
+
+> **`401 Unauthorized`.** Not a stall — **an authentication rejection that git retried forever because
+> no terminal existed to prompt on.** `GIT_TERMINAL_PROMPT=0` suppressed the prompt **and therefore
+> suppressed the error**, converting an actionable failure into a silent hang.
+
+**The credential state, and it was correctable:**
+
+| scope | file | `credential.helper` |
+|---|---|---|
+| **system** | `C:/Program Files/Git/etc/gitconfig` | **`manager`** ← the Git for Windows installer default |
+| global | `C:/Users/PC/.gitconfig` | `store` |
+
+**The token itself was never the problem.** Verified independently against the GitHub API:
+`authenticated as: youcefnowbi-a11y`, **`push=True`, `admin=True`** on the target repo. **The credential
+was valid and the helper chain could not reach it.**
+
+**Resolution — the push SUCCEEDED, and the fix was to bypass the helper rather than repair it:**
+
+```
+git -c credential.helper= push https://<user>:<token>@github.com/<owner>/<repo>.git main
+  → 0893e35..902d035  main -> main
+```
+
+**Verified:** `local 902d0352e2b946b7e7257fff58a89b360a9e922a` = `remote 902d035…`, and all nine
+deliverables confirmed present in the remote tree by `git ls-tree`.
+
+**Unresolved: the system-scope `manager` entry still intercepts a plain `git push`, and four separate
+override attempts failed** — local-scope empty-reset, global-scope empty-reset, per-host
+`credential.https://github.com.helper`, and `--unset-all` at every writable scope. **Git executes every
+helper in the chain; a later `store` does not prevent an earlier `manager` from running and hanging.**
+**Operational rule adopted: push with the inline credential and `-c credential.helper=`. Do not rely on
+a bare `git push` in this repo.**
+
+### 14.1 The two lessons, both of which are §12's
+
+1. **A hung instrument and a false zero are the same defect wearing different clothes.** The push hang
+   and the `origin/HEAD..HEAD → 0` both reported *nothing happening*. **One was a blocked action and one
+   was an unmeasured one, and neither was distinguishable from success at the CLI.** *The remedy in both
+   cases was the same: make the instrument show its work* — `GIT_CURL_VERBOSE` for the first, an explicit
+   SHA for the second.
+2. **An error-suppression flag suppresses the diagnosis with the symptom.** `GIT_TERMINAL_PROMPT=0` is
+   correct for automation and **it is exactly why the failure was silent for three attempts.**
+   *A flag that makes a tool non-interactive also makes it non-explanatory.*
