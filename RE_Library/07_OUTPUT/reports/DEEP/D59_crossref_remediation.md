@@ -107,3 +107,104 @@ $SS  = [string][char]0x00A7                                       # NEVER a lite
 | `Figure 12.4` | **0** | OK |
 
 `[inference]` **These five negatives are the load-bearing part.** The first two are the exact strings that a broken character class *did* match during development (§8 F1) — they produced phantom `§1.0` and `§0.1.71` references and inflated the edge count **5×**. **The negative control is what caught it, not inspection.**
+
+### 0.4 Self-exclusion, stated rather than silent
+
+`[inference]` **This report is excluded from its own audit, and the predecessor set the same convention.** Both documents *quote* section references as examples of the very defect they measure. `CROSSREF_AUDIT.md` contributed **120 edges** and this file would contribute **~30** — all of them quotations, none of them claims.
+
+`[verified]` The exclusion is a **stated filter**, not an omission:
+```powershell
+$metaRe = 'CROSSREF_AUDIT\.md$|D59_crossref_remediation\.md$'
+```
+`[inference]` **The cost is recorded:** the two documents that contain the most section-sign text in the corpus are the two whose own references are **not** audited. A reference *inside* a quoted example is not a pointer and cannot dangle — but that is an argument, not a measurement, and it is why this is a residual (§7 R-59.3).
+
+---
+
+## §1 Q1 — the audit re-run
+
+### 1.1 The population
+
+`[verified]` **Enumeration, not recollection.** The predecessor audited 15 reports. The tree now holds:
+
+| Measure | Value | Invocation |
+|---|---|---|
+| `.md` files under `reports\` (recursive) | **79** | `Get-ChildItem $r -Recurse -File -Filter '*.md'` |
+| — excluded: `README.md` (56 B, a stub: *"# Reports / Written analyses. One per target.") | 1 | |
+| — excluded: `DEEP\extractions\DEEP\D6\IOC_pupy.md` (a **4-deep extraction artifact**, not a report) | 1 | |
+| **AUDIT POPULATION** | **77 documents** | |
+| distinct document numbers indexed | **63** | |
+| **multi-file document numbers** | **`D11` = 5 files, `D12` = 2 files** | §6.2 |
+
+`[verified]` **Two corrections to the enumeration itself, both from a first pass that was wrong:**
+
+1. My first breakdown read *"DEEP 64 + other 1"* — **arithmetically right, semantically wrong.** The "other 1" was `DEEP\extractions\...`, which is *inside* DEEP at depth 4. `[inference]` This is the predecessor's **Mode C** problem in a new place: a path-prefix test that keys on the first directory name conflates a subtree with a file set.
+2. `IOC_pupy.md`'s first line **displays** as `# D6 â€” Pupy IOC...`. `[verified]` **The bytes are correct**: `23 20 44 36 20 E2 80 94 20` — that is a well-formed UTF-8 em-dash. `[inference]` **The mojibake is in the console, not the file.** I nearly recorded a byte defect that does not exist; measuring the bytes stopped it. This is the corpus's **fourth** rendering-vs-bytes instance (§8 F4).
+
+### 1.2 The extraction rule
+
+`[inference]` **Stated explicitly and printed, because the predecessor's rule was not, and that is D55's D-7.** A bare count has no population. This section is the population.
+
+**Rule R — a reference is a section sign followed by a dotted number, with an optional backward-visible document prefix.**
+
+```
+PASS 1   On every non-heading line, locate every U+00A7 SECTION SIGN.
+PASS 2a  Read the dotted number immediately after it (up to 3 digits, 3 components).
+PASS 2b  Scan BACKWARD up to 60 characters for the nearest \bD(\d+)\b.
+           found  -> XDOC : that document number is the target
+           absent -> LOCAL: the citing document's own number is the target
+```
+
+**Excluded by rule, each counted:**
+
+| Excluded form | Count | Why |
+|---|---|---|
+| section sign with no readable number following | **52** | e.g. `§B4` (appendix letters, D14's Part B), `§II` |
+| section sign followed immediately by `:` | **2** | the corpus's **section-line** convention — `§:107-110` means *lines 107–110* |
+| section sign followed by **3+ digits** | **1** | an offset/line number, not a section |
+| duplicate `(file, line, target)` | **208** | one line that names the same target twice is **one edge**, not two |
+
+`[verified]` **A sample of what the rule matches** — the first twelve edges found, with their source line:
+
+| file:line | matched | → target | kind |
+|---|---|---|---|
+| `D55:57` | `D29 §5 / D38 §8.6` | `D29 §5` | XDOC |
+| `D55:57` | *(same line)* | `D38 §8.6` | XDOC |
+| `D6:4367` | `D5 §21` | `D5 §21` | XDOC |
+| `D17:935` | `D3 ... §23.3` | `D3 §23.3` | XDOC |
+| `D14:762` | `§9.1 — CLOSED` | `D14 §9.1` | LOCAL |
+| `D1:1453` | `see §12.4` | `D1 §12.4` | LOCAL |
+| `D6:5258` | `D6 §25.6` | `D6 §25.6` | XDOC |
+| `D48:10` | `§0.1 — The Makefile...` | `D48 §0.1` | LOCAL |
+| `D32:257` | `D24 §8` | `D24 §8` | XDOC |
+
+`[inference]` **`D55:57` is the pair that proves the two-pass design.** A single regex captured `doc=''` for the second reference on that line — because `Regex.Matches` resumes scanning **after** the first match consumed `D29 §5`, and the `D38` prefix then sits behind the cursor. (§8 F2.) The backward scan is not a refinement; it is the difference between **2 false SUB-MISSING** and the correct **2 OK**.
+
+### 1.3 The counts
+
+`[verified]` **77-document corpus, 3,941 extracted edges, meta-excluded:**
+
+| Verdict | Count | Share |
+|---|---|---|
+| **OK** | **3,685** | **97.204 %** |
+| **PARENT-OK, SUB-MISSING** | **106** | 2.796 % |
+| **DANGLING** | **0** | **0.000 %** |
+| **total (excl. meta)** | **3,791** | |
+| *meta-quoted edges excluded* | *150* | |
+
+`[verified]` **The comparison with the predecessor, stated as a comparison and not as a correction:**
+
+| | Predecessor | This audit | Ratio |
+|---|---|---|---|
+| documents | 15 | **77** | 5.13× |
+| edges | 1,648 | **3,941** | 2.39× |
+| OK | 1,626 (98.66 %) | **3,685 (97.20 %)** | — |
+| SUB-MISSING | 16 | **106** | 6.6× |
+| DANGLING | 6 | **0** | — |
+
+`[inference]` **Three things follow, and the third is the interesting one.**
+
+1. **The brief's instruction was right: the old number cannot be trusted forward.** It was a true statement about 15 reports.
+2. **`SUB-MISSING` grew faster than the corpus did** — 6.6× against 5.13× more documents. `[inference]` The failure rate **rose** from 0.97 % to 2.80 %.
+3. **`DANGLING` went to zero, and that is not a repair.** `[verified]` §4 shows all six predecessor dangles are **still present, still unresolved** — they now resolve as `SUB-MISSING` because **the documents they point into have themselves grown new sections**, or because a `D<n>` that had no file now has one. **A dangle that disappears without an edit is a boundary movement, not a fix.** §4.1 resolves each by hand.
+
+[^1]: **A correction to this section, caught by re-reading, kept rather than erased.** The first draft of this header read *"36-document corpus."* `[verified]` The correct figure, measured in §1.1 and used everywhere else in this report, is **77 documents / 63 document numbers**. The `36` was transcribed from an intermediate scratch value and never re-measured before it was written down — **which is precisely the defect this report exists to audit, committed inside it.** It is recorded here because deleting it would make this document's own arithmetic look cleaner than its method was. §8 F-7.
