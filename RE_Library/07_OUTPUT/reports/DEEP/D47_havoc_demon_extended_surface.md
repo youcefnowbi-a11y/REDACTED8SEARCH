@@ -859,4 +859,52 @@ Get-ChildItem $h\teamserver -Recurse -File -Filter *.go | Select-String -Pattern
 
 ---
 
-*(§6 follows)*
+## §6 — RESIDUAL UNKNOWNS, INSTRUMENT FAILURES, AND COVERAGE
+
+### 6.1 Residual unknowns, each with a concrete probe
+
+| ID | Unknown | Probe that closes it |
+|---|---|---|
+| **U-1** | **Does the mem-file chunk path's `Packer.Build()` at `handlers.go:287` reach the agent encrypted?** §4.3 measured the arguments at `:284` as the session key, so the construction is settled; what is not settled is whether the agent decrypts the chunk on receipt. | Read the agent's mem-file handler entry. If it calls `ParserDecrypt` before consuming the chunk, the path is symmetric; if it consumes bytes directly, the server encrypts and the agent does not decrypt. **Grep `CommandMemFile` in `payloads/Demon/src/core/Command.c` and read the first 30 lines of the handler.** |
+| **U-2** | **`SmbRecv`'s offset-0 ID read — does it produce an observable false disconnect in a real pivot deployment, or is `Session.AgentID` coincidentally equal to the length field in practice?** §3 establishes the offset mismatch by reading four functions. **I have not run it.** | Instrument `SmbRecv:84` with both values logged (no REA/runtime tooling in this session). **Source-only alternative: read `PivotPush` in `payloads/Demon/src/core/Pivot.c`, the writer into the pivot pipe, and print the first 8 bytes it produces.** |
+| **U-3** | **`RandomNumber32` entropy — are consecutive IV/key bytes equal?** §5.6 establishes the seed is `NtGetTickCount()` at `:1309` and the output is coerced even at `:1314`. **Whether consecutive calls in the `Demon.c:118-122` loop return the same value is a runtime property.** | Read `RtlRandomEx`'s declaration and the `Instance->Win32.RtlRandomEx` resolution site to determine whether it is the documented deterministic `RtlRandomEx` or a resolved syscall. **The equality half is source-unclosable and needs a run.** |
+| **U-4** | **The `nil, nil` packer's own `Build()` write site.** §4.6 establishes an unencrypted reply built from `NewPacker(nil, nil)` would be silent in a default deployment, and that neither `handlers.go:85` nor `:284` is that site. **Where the `nil, nil` packer's output is written is unmeasured.** | Census every `packer.NewPacker(` call and print each argument list; for each `nil, nil` result, find the `Response.Write` or socket write on its path. **`Get-ChildItem teamserver -Recurse -Filter *.go | Select-String 'NewPacker\('` then read the surrounding 6 lines at each.** |
+| **U-5** | **The Go stdlib CTR counter order, read from source rather than inferred from interop.** §5.2 establishes agreement by the protocol functioning. **`crypto/cipher/ctr.go` and the Go toolchain are absent from this box** — `Get-Command go` → not on PATH; `C:\Program Files\Go` and `C:\Go` → both absent. | Obtain `crypto/cipher/ctr.go` for the Go version in `teamserver/go.mod` and read the `inc`/`PutUint32` sequence. **Until then the interop argument stands as the evidence and this is explicitly a source gap, not a resolved question.** |
+| **U-6** | **`Packer.Build()` when `p.data` is shorter than one AES block.** `XCryptBytesAES256` does `ReverseXBytes = make([]byte, len(XBytes))` then `XORKeyStream`. **A zero-length `p.data` yields a zero-length ciphertext — the same observable as the `[]byte{}` error return at `aes.go:17-18`.** | At each `Build()` site, determine whether `p.data` can be empty. `AddUInt32` always writes 4 bytes at the two wire sites, so those are non-empty by construction. **Check whether `dispatch.go:915` or `builder.go:408` can produce a 0-byte `p.data`.** |
+| **U-7** | **Whether `AesXCryptBuffer`'s counter can wrap.** | **Bounded, not open.** The carry at `AesCrypt.c:230-239` handles `255 → 0` with `continue`, a correct 128-bit big-endian counter; wrapping needs 2^128 blocks under one key, unreachable at message scale. **Stated so the residual list is not padded.** |
+
+### 6.2 Instrument failures, recorded honestly
+
+**Failure 1 — the under-scoped outbound set produced a false clean.** My first outbound extraction took labels only from `TaskPrepare` (`demons.go:128-2284`) → 22 labels. **Diffed against the 28 inbound labels, Direction A returned empty.** **Had I stopped there, D47 Q1 would have read "the sets are clean" — and the single asymmetry in the corpus would have been missed.** **Caught by enumerating `Job{...}` constructions teamserver-wide rather than trusting the function I happened to be reading.** **Root cause: an outbound set defined by one function is under-scoped when the sender is a struct literal that can be built anywhere.**
+
+**Failure 2 — a wrong-name-space search returned a false zero.** `Select-String 'COMMAND_GET_JOB'` and five sibling labels across `payloads/Demon` returned **0 hits for all six**. **Not an absence: the agent names them `DEMON_COMMAND_*`.** **Positive control `DEMON_COMMAND_NO_JOB` → 3 hits, proving the instrument worked and the zero was a naming artifact.**
+
+**Failure 3 — the include guard counted as a command.** My `DEMON_COMMAND_*` census returned **62**; one is `#define DEMON_COMMAND_H` at `Command.h:2`, the include guard, matching because `H` is a letter. **Correct count is 61.** **Caught by reading `Command.h:1-2` rather than trusting the pattern's output.**
+
+**Failure 4 — a Class A count written before the classification run.** In the first draft of §2.2 I wrote **34** sub-command defines and listed 33 rows. **The classification run returned 33; `DEMON_COMMAND_JOB_DIED` is Class D (`Jobs.c`), not Class A.** **Corrected to 33 with the run's output printed in the section.** **Root cause: writing the table from the visual bulk of an earlier list rather than from the classification pass.**
+
+**Failure 5 — the `NewPacker(nil, nil)` misattribution.** In the first draft of §4 I asserted `handlers.go:85` was `NewPacker(nil, nil)` and built a conclusion on it (an unencrypted `DEMON_INIT` ack). **Reading `:82-90` showed `NewPacker(Agent.Encryption.AESKey, Agent.Encryption.AESIv)`.** **Corrected in §4.3 rather than silently.** **Root cause: carrying a note about a `nil, nil` packer existing in the tree and attaching it to a site without reading the site.**
+
+**Failure 6 — I damaged this file's encoding while trying to "fix" it.** A `read` display showed `§` as `Â§`, which I misread as a double-encoded file. It was not — the bytes `C2 A7` are the **correct** UTF-8 for `§`, and the display was decoding as Latin-1. **My first repair pass round-tripped the text through ISO-8859-1 and the second through CP1252, replacing 161 special characters with U+FFFD and destroying the backup in the process.** **Recovered by enumerating every replacement character's context and restoring `§`, `—`, `→`, `–` by position, then validating the result as strict UTF-8: 42 section signs and 118 em-dashes restored, 0 replacement characters remaining.** **The lesson is not about encodings — it is that I acted on a display artifact without first reading the bytes, which is the same failure mode as Failure 1 and Failure 5.** **Every other instrument failure in this report cost a number; this one nearly cost the artifact.**
+
+**Net: six self-caught errors, all corrected before final delivery, all recorded. Two of them (1 and 2) would have produced a wrong headline; three (3, 4, 5) were figure or attribution errors; one (6) was damage to the file itself.**
+
+### 6.3 What each of the five D39 uncertainties resolved to
+
+| D39 ref | Question | D47 answer |
+|---|---|---|
+| **U5** | the outbound/inbound set difference | **§1 — one asymmetric label, `COMMAND_NOJOB`, a framing sentinel correctly absent from both dispatch surfaces. No defect.** |
+| **U1** | 62 defines vs 23 table rows | **§2 — 61 real defines, 21 in the table, 40 outside on a second identifier axis, every one consumed. No dead define.** |
+| **U2** | the SMB 8-byte read header | **§3 — bug. `SmbRecv` reads the agent ID from offset 0 where the writer places the length; `PivotParseDemonID` reads it correctly from offset 8. No HTTP-style absorber because there is no decrypt on this path.** |
+| **U3** | does `Packer.Build()` reach agent traffic | **§4 — yes, at two sites, both encrypted with the session key. D34's transport finding is not inverted.** |
+| **U4** | nonce reuse | **§5 — two-time pad, confirmed with the counter arithmetic, and load-bearing for the agent's in-place re-XOR. Plus a second finding: the key and IV bytes are coerced even.** |
+
+### 6.4 Coverage statement
+
+**Read in full for this report:** `crypt/aes.go` (25 lines), `packer/packer.go` (109 lines), `Command.c:96-125` and `:682-686`, `AesCrypt.c:215-246` and `:103-107`, `TransportSmb.c:1-138`, `Transport.c:1-113`, `Win32.c:1202-1218` and `:1304-1315`, `Package.c:174-185` and `:333-406`, `Pivot.c:24-68` and `:331-346`, `Demon.c:112-123`, `Demon.h:152-159`, `handlers.go:80-92` and `:280-295`, `Command.h:1-2`.
+
+**Counted by instrument, not read in full:** the `DEMON_*` define census (101 total), the `Command.c` switch census (12), the `Job{...Command:}` census (29 labels / 10 sites), the `AddJobToQueue` census (9 sites), the `AesInit` census (4 real sites), the `Packer.Build()` census (4 sites), the `NewPacker` census, the depth-1 `TaskDispatch` case census (28).
+
+**Not read, declared:** `pkg/handlers/smb.go` and `http.go` (7,604 B / 290 lines), `pkg/events/listeners.go`, `service/service.go`'s packer construction, the Go standard library.
+
+**End of D47.**
