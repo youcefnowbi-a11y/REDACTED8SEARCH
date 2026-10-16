@@ -208,6 +208,259 @@ CovenantUserApiController.cs:303: public async Task<ActionResult<IdentityUserRol
 
 `[inferred]` **Net answer to the brief's question: the `CreateUser`-created account gets `"User"`, the caller cannot influence it, and the one path that CAN grant a privileged role is admin-gated and DB-sourced. The escalation is confined to the empty-table bootstrap (§2.4).**
 
+### 2.6 A thread from D52 §1.4 — retracted
+
+`[read]` I flagged `Covenant.cs:253` in §1.4 as a possible dead role check, since it tests `IsInRole("Administrators")` (plural) while only `"Administrator"` is ever seeded. **Reading the containing method resolves it against my lead, and I am withdrawing the implication.**
+
+`[read]` **`Covenant/Covenant.cs:247-256`:**
+```csharp
+private static bool IsElevated()
+{
+    if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+    {
+        var identity = WindowsIdentity.GetCurrent();
+        var principal = new WindowsPrincipal(identity);
+        return principal.IsInRole("Administrators");       // :253
+    }
+    return Environment.UserName.Equals("root", StringComparison.CurrentCultureIgnoreCase);
+}
+```
+
+`[verified]` **`"Administrators"` is the correct Windows LOCAL GROUP name — plural is right.** The principal is a `WindowsPrincipal` built from `WindowsIdentity.GetCurrent()`, not a `ClaimsPrincipal` from a JWT. The method asks "is this Covenant process elevated on the host?" — an OS question. `[read]`
+
+`[inferred]` **My §1.4 flag was a lexical match on a shared token across two unrelated domains** — ASP.NET Identity roles and Windows local groups. **That is instrument failure #13's shape again, in a new costume: I matched on a string where the question was about which *system* the string addresses.** `[verified]` **No defect. Recorded because I raised it.**
+
+---
+
+## 3. Q3: the authority surface of `CovenantService.cs`
+
+### 3.1 The enumeration key — built from the class body, not by prefix
+
+`[read]` `CovenantService` is registered `AddTransient<ICovenantService, CovenantService>()` at **`Covenant/Startup.cs:195`**, and controllers hold it as **`_service`**. So the reachable set is every `_service.X(...)` call site in a controller body — **enumerated by scanning controller method bodies for the call expression, not by filtering method names.** `[verified]` This is the D56 trap avoided: a name-prefix filter on `Create*` would have dropped `GetCurrentUser`, `InteractGrunt`, and `Login`; a filter on `*HttpListener` would have merged two different methods.
+
+`[verified]` **179 distinct service methods are invoked from controllers.** Full list derived; the classification follows.
+
+### 3.2 The gate structure — one attribute per controller, at class level
+
+`[read]` Mapped every `[Http*]` action to its class-level and method-level attributes. `[verified]` **The result is unusually uniform:**
+
+| Controller | Class attribute | Action-level overrides |
+|---|---|---|
+| `ApiControllers/*` — **16 of 17** | `[ApiController, Route(...), Authorize(Policy = "RequireJwtBearer")]` | **none** `[verified]` |
+| `ApiControllers/CovenantUserApiController.cs` | `[ApiController, Route("api"), Authorize(Policy = "RequireJwtBearer")]` | **5**: `:107` `[AllowAnonymous]`, `:131` `[AllowAnonymous]`, `:205`/`:300`/`:326` `[Authorize(Policy = "RequireAdministratorRole")]` `[verified]` |
+| `ListenerControllers/HttpListenerController.cs` | **`[AllowAnonymous]`** — no `Authorize` anywhere in the file | class-level *and* `:41` `[AllowAnonymous]` `[verified]` |
+
+`[verified]` **`RequireAdministratorRole` appears at action level in exactly THREE places, all in `CovenantUserApiController.cs`** — matching §1.1 row 1's `RequireAdministratorRole` count of 7 (2 in `Startup.cs` as a policy definition, 2 in `HttpListener.cs` as a policy definition, **3 as actual controller annotations**). `[verified]`
+
+### 3.3 The structural answer: only TWO methods in the file can even SEE a principal
+
+`[read]` Exhaustive `ClaimsPrincipal` enumeration across the whole tree. `[verified]` **In `CovenantService.cs` — 255,768 B, 5,138 lines, 179 controller-reachable methods — exactly two methods accept a `ClaimsPrincipal`:**
+
+| Method | Interface | Impl | Site |
+|---|---:|---:|---|
+| `GetCurrentUser(ClaimsPrincipal principal)` | `:36` | `:446` | `CovenantUserApiController.cs:82,162` `[read]` |
+| `CreateUserVerify(ClaimsPrincipal principal, CovenantUserRegister register)` | `:38` | `:481` | `CovenantUserApiController.cs:138` `[read]` |
+
+`[verified]` **The other 177 controller-reachable methods have no principal parameter, therefore contain no role decision, therefore are guarded entirely by the controller's class-level attribute.** `[verified]`
+
+`[inferred]` **This is the single most important structural fact about Covenant's authority model: authorization is ONE attribute per controller class, enforced by ASP.NET's middleware, and the service layer is structurally incapable of a second check.** There is no defense in depth because there is no second place to put one. **D40 §3.1's "authorization is attribute-only" finding is correct, and this is *why*.**
+
+### 3.4 The `CreateHttpListener` siblings — D46's finding has a verbatim twin
+
+**The brief asks: "Are there siblings?"** `[verified]` **Yes — exactly one, and it is a structural clone.**
+
+`[read]` **Exhaustive account-minting census in `CovenantService.cs`** — every `GenerateJwtToken` site, every `CreateUserRole(` call, every `new CovenantUserLogin`:
+
+| Line | Site | Role granted | JWT lifetime | Principal? |
+|---|---|---|---:|---|
+| `:473` | `Login` | caller's own | per config | n/a — this is the login path `[read]` |
+| **`:3964`** | **`CreateHttpListener`** | **`Listener`** | **`2000`** | **NONE** `[verified]` |
+| **`:4002`** | **`CreateBridgeListener`** | **`Listener`** | **`2000`** | **NONE** `[verified]` |
+
+`[read]` **The two are line-for-line equivalents** (`:3950-3987` vs `:3989-…`):
+```csharp
+string password = Utilities.CreateSecureGuid().ToString() + "A";          // :3955 / :3993
+CovenantUser listenerUser = await this.CreateUser(new CovenantUserLogin
+{
+    UserName = Utilities.CreateSecureGuid().ToString(),
+    Password = password
+});                                                                        // :3956 / :3994
+IdentityRole listenerRole = await this.GetRoleByName("Listener");          // :3961
+IdentityUserRole<string> userrole = await this.CreateUserRole(listenerUser.Id, listenerRole.Id);  // :3962 / :4000
+listener.CovenantToken = Utilities.GenerateJwtToken(
+    listenerUser.UserName, listenerUser.Id, new[] { listenerRole.Name },
+    _configuration["JwtKey"], _configuration["JwtIssuer"],
+    _configuration["JwtAudience"], "2000"                                  // :3967 / :4005
+);
+```
+
+`[verified]` **D46's `CreateHttpListener` characterization is exactly right — zero authorization checks, a `Listener`-role account, a 2000-minute JWT — and `CreateBridgeListener` reproduces it verbatim.** The only differences are the profile getter (`GetHttpProfile` vs `GetBridgeProfile`, `:3953` vs `:3991`) and the role lookup idiom (`GetRoleByName("Listener")` at `:3961` vs `_context.Roles.FirstOrDefaultAsync(R => R.Name == "Listener")` at `:3999`). `[verified]`
+
+### 3.5 The guard on the siblings, and where the asymmetry actually is
+
+`[verified]` **Both service methods are reachable from TWO controller routes with DIFFERENT guards:**
+
+| Route | Controller site | Guard | Service method |
+|---|---|---|---|
+| `POST api/listeners/http` | `ListenerApiController.cs:156-161` | **`RequireJwtBearer`** (class, `:16`) `[read]` | `CreateHttpListener` `[read]` |
+| `POST api/listeners/bridge` | `ListenerApiController.cs:219-…` | **`RequireJwtBearer`** (class, `:16`) `[read]` | `CreateBridgeListener` `[read]` |
+| hub `CreateHttpListener` | **`CovenantHub.cs:162-165`** | **NONE — no `[Authorize]`** (§0.2) `[verified]` | `CreateHttpListener` `[read]` |
+
+`[inferred]` **The asymmetry D46 found is not in the service method — it is in the ROUTE.** The REST route is `RequireJwtBearer`-guarded; the hub route is unguarded. **The same service method, two entry points, one gate.** D46's finding stands; **§3.4 shows it is a two-instance class of finding, not one**, because `CreateBridgeListener` sits behind the identical service-level absence and the hub would expose it the same way if a hub method forwarded to it.
+
+`[read]` **`CovenantHub.cs:162-165` is live, not comment-enclosed** — `[verified]` the enclosing block comment ends at `:161` (`*/`) and the next `/*` opens at `:166`, so **`:162-165` is between two comment blocks, which is exactly how D32 §2 described this class's structure.** `[verified]` This is D32's **block-commenting** hidden-boundary mechanism, and it is what makes `CreateHttpListener` the only live method of 222 apparent ones (D40 §1.1). `[verified]`
+
+### 3.6 The class-level classification, stated as the brief requires
+
+`[verified]` **Guarded / unguarded, for every controller-reachable surface:**
+
+| Class | Controller-reachable methods | Guard | Verdict |
+|---|---:|---|---|
+| 15 `ApiControllers/*` (single-purpose) | 15 cont. / 15 svc methods | class `RequireJwtBearer` | **guarded** (no principal seen by service) `[verified]` |
+| `CovenantUserApiController` | 17 actions | class `RequireJwtBearer`; 2 `AllowAnonymous`; 3 `RequireAdministratorRole` | **mixed — see table** `[verified]` |
+| `HttpListenerController` (ListenerControllers) | 1 action | **`AllowAnonymous` (class)** | **UNGUARDED — implant-facing by design** `[verified]` |
+| `CovenantHub` (`/covenanthub`) | **1 live method** (`CreateHttpListener`) | **NONE** | **UNGUARDED — D46's finding** `[verified]` |
+
+`[read]` **`CovenantUserApiController` broken out — all 17 actions:**
+
+| Guard | Count | Actions |
+|---|---:|---|
+| `AllowAnonymous` | **2** | `:108` `POST users/login` → `Login`; `:132` `POST users` → `CreateUserVerify` `[verified]` |
+| `RequireAdministratorRole` (method-level) | **3** | `:206` `DELETE users/{id}` → `DeleteUser`; `:301` `POST users/{id}/roles/{rid}` → `CreateUserRole`; `:327` `DELETE users/{id}/roles/{rid}` → `DeleteUserRole` `[verified]` |
+| class `RequireJwtBearer` only | **12** | the remainder `[verified]` |
+
+`[verified]` **Bound: 18 controllers, 2 directories, every `[Http*]` action in each enumerated from the class body, every service call resolved to an `ICovenantService` member.** The two `AllowAnonymous` routes are the complete set of unauthenticated REST surface; `HttpListenerController.Route()` is the third unauthenticated endpoint and the only one that is *entirely* unauthenticated. `[verified]`
+
+---
+
+## 4. Q4: R-52.6.1, the `Token==true` co-occurrence
+
+### 4.1 The probe, run as stated
+
+`[read]` **Invocation:** every `TokenTask` occurrence across `Covenant/Data/Tasks/*.yaml` (the YAML key) **and** every `TokenTask` in `*.cs` (the C# property), enumerated with `Get-ChildItem -Recurse` + per-file `Select-String`, matches printed. `[verified]`
+
+### 4.2 The answer
+
+`[verified]` **`Token == true` CAN occur — 5 tasks set it. It CANNOT co-occur with a control tasking type. R-52.6.1 resolves as a clean negative, and D52 §2.3 stands.**
+
+`[verified]` **Counts, both species, over `Covenant/Data/Tasks/` (11 files):**
+
+| Value | Count |
+|---|---:|
+| `TokenTask: true` | **5** |
+| `TokenTask: false` | **90** |
+| **`TokenTask:` any** | **95** |
+
+`[verified]` **95 total reconciles exactly with D50's 95-task figure and D40's boundary** — every task definition declares the key, so the key count IS the task count.
+
+### 4.3 The five `true` tasks, named
+
+`[read]` All five are in **`SharpSploit.Credentials.yaml`:**
+
+| Line | Task | `TaskingType` at | Type |
+|---|---:|---|---|
+| `L51` | `MakeToken` | `L49` | **`Assembly`** `[verified]` |
+| `L178` | `GetSystem` | `L176` | **`Assembly`** `[verified]` |
+| `L272` | `ImpersonateProcess` | `L270` | **`Assembly`** `[verified]` |
+| `L373` | `ImpersonateUser` | `L371` | **`Assembly`** `[verified]` |
+| `L701` | `RevertToSelf` | `L699` | **`Assembly`** `[verified]` |
+
+`[inferred]` **The semantic is coherent and instructive: all five are token-manipulation tasks** — make a token, steal SYSTEM, impersonate, revert. `TokenTask: true` means *"this task manipulates the grunt's process token,"* which is precisely why only these five carry it. `[verified]` **The key is task-semantic, not tasking-type-semantic.**
+
+### 4.4 The co-occurrence hinge, resolved
+
+`[verified]` **`TaskingType` is set in all 95 task definitions** — no task omits it. The 12 distinct values are the 10 enum members of `GruntTaskingType` (`GruntTasking.cs:63-75`) plus repeats, and **the 4 control-typed `Set` variants plus `Connect`/`Disconnect`/`Exit`/`Tasks`/`TaskKill` all declare `TokenTask: false`.** `[verified]`
+
+`[read]` **`GruntTasking.cs:90-91` — the tasking model has NO `TokenTask` property at all:**
+```csharp
+public GruntTaskingType Type { get; set; } = GruntTaskingType.Assembly;
+public List<string> Parameters { get; set; } = new List<string>();
+```
+
+`[verified]` **The `Token` on the wire is not a tasking field — it is read through the task FK** at `InternalListener.cs:239`:
+```csharp
+Token = tasking.GruntTask == null ? false : tasking.GruntTask.TokenTask
+```
+
+`[inferred]` **So the co-occurrence requires a control-typed TASK DEFINITION carrying `TokenTask: true` — and none exists.** The five `true` tasks are all `Assembly`; every control-typed task is `false`; and `TaskingType` is never omitted, so there is no default-resolution path that could silently produce a control type on a `true` task. `[verified]`
+
+`[verified]` **The server-constructed control taskings corroborate independently.** Reading the four object initializers at `CovenantService.cs:1320-1361` (and their siblings through `:1416`), each sets exactly: `Id, GruntId, Grunt, GruntTaskId, GruntTask, Status, Type, Parameters, GruntCommand, GruntCommandId`. **`TokenTask` is never assigned** — consistent with §4.4's finding that the field does not exist on the tasking type. `[verified]`
+
+`[inferred]` **R-52.6.1 closes: D52 §2.3's claim — that a control tasking reaching `TaskExecute` via `:188` would mis-parse raw `"Delay,300"` — is not reachable via the bundled corpus.** D52 §2.3 stands as written. **The residual was well-founded and is now discharged rather than carried.**
+
+### 4.5 What would falsify this, stated as a probe
+
+`[inferred]` **The negative is bounded by the bundled corpus.** It fails if any of the following becomes true: **(a)** a user-authored task definition sets `TokenTask: true` **and** a control `TaskingType` — the YAML is data, and Covenant's task-import path accepts it; **(b)** a control tasking is constructed by a path other than the four initializers at `:1320-1416`; **(c)** `GruntTasking` gains a `TokenTask` property in a later revision. `[inferred]` **Probe for (a):** re-run §4.2's counts after any task-set change; the invariant to assert is **`TokenTask:true` ⊆ `TaskingType:Assembly`**. `[inferred]` **(a) is the live one** — the invariant holds for the shipped corpus but is not enforced by any validator, per D50's `ParseParametersIntoTask` finding.
+
+---
+
+## 5. Instrument record
+
+### 5.1 Failure #15 — the bracket-adjacent attribute, now with its blast radius measured
+
+`[verified]` **Failure #13 (`\[Authorize` against combined attribute lists) was reported by D50 as a single-table error. D63 §1.1 measures its actual propagation: it corrupted FOUR published figures across TWO reports** — D40's `[Authorize]` count, D40's file count, D40's `AllowAnonymous` file list, and D50's controller total. `[verified]`
+
+`[inferred]` **The generalizable lesson is not "use word boundaries." It is that a false zero does not stay local** — it is absorbed into every downstream figure that shares its denominator, and the downstream figures then corroborate each other. **D40 line 103 and line 270 disagree, and that disagreement was the only surviving trace of the error.** `[verified]`
+
+### 5.2 Failure #16 (new, self-caught this round) — table rows correct, sum wrong
+
+`[verified]` D50 §2.1's per-controller table was **individually correct on every row** and **wrong in its total** (21 vs 20). `[verified]`
+
+`[inferred]` **This is a distinct failure mode from every prior entry in the ledger:** the instrument was sound, the matches printed, and the arithmetic was not re-derived from the rows. **The rule: a total must be computed from the emitted rows, never carried alongside them.** `[verified]` §1.1's table and §4.2's counts above were both produced by summing the enumerated matches, not by restating a remembered figure.
+
+### 5.3 Failure #17 (new, self-caught and RETRACTED) — cross-domain token match
+
+`[read]` §1.4 and §2.6: I matched `IsInRole("Administrators")` against the seeded role `"Administrator"` and implied a dead check. **The containing method (`Covenant.cs:247-256 IsElevated`) addresses the Windows local group, not ASP.NET Identity roles.** `[verified]` **Retracted — no defect.**
+
+`[inferred]` **The rule: a shared string across two authorization domains is not evidence.** The question is never "does this token appear elsewhere?" but **"which system does this call resolve against?"** `[verified]` **Instrument failure #13's shape, third costume.**
+
+### 5.4 Instrument discipline applied this round
+
+`[verified]` **Every figure in §1–§4 was produced with a printed match list**, all numbers summed from those matches (§5.2), **comments stripped before classification** (block then line, in that order), **controller action names read from class bodies** rather than prefix-filtered (§3.1), **and `[absence]` claims given a positive control** — §4.4's `TaskingType` census first proved the YAML probe could fire (it returned 95 hits on a key that exists) before §4.2 trusted its 0 on `TaskingType` omission. `[verified]`
+
+### 5.5 Species ledger for this report
+
+`[inferred]` **Six species were counted and each needed its own instrument:**
+
+| Species | Count | Instrument |
+|---|---:|---|
+| bare `[Authorize]` | **5** | `\bAuthorize\b` minus `\bAuthorize\s*\(` |
+| `Authorize(Policy=…)` in a combined list | **20** | `\bAuthorize\s*\(` |
+| `[AllowAnonymous]` | **4** | `\bAllowAnonymous\b`, stripped |
+| controllers | **18** | two directories, not one |
+| `TaskingType` keys | **95** | `^\s*TaskingType:` in YAML |
+| `ClaimsPrincipal`-taking service methods | **2** | `ClaimsPrincipal` in the service file |
+
+`[inferred]` **Five of the six would have been silently wrong under a single-instrument pass.** That is the report's methodological result.
+
+---
+
+## 6. Residuals
+
+### R-63.1 `[verified]` — `TokenTask:true` ⊆ `Assembly` is unenforced
+
+`[inferred]` §4.5(a): the invariant holds for the shipped corpus; **nothing validates it on import.** A user-authored task with a control `TaskingType` and `TokenTask: true` would reach `TaskExecute` with raw `"Delay,300"` — D52 §2.3's scenario — but only for control types **other than the four label-first ones D52 already showed are consumed inline.** `[inferred]` **Probe:** trace `CovenantService` task-import (`ParseParametersIntoTask` at `L2472` and its callers) for any type check on `TokenTask`.
+
+### R-63.2 `[read]` — `HttpListenerController` has no route prefix and was absent from every prior census
+
+`[verified]` §0.4/§1.2: class `[AllowAnonymous]`, one `Route()` action, **no `Route` attribute on the class.** Its actual URL depends on `Startup`'s endpoint mapping, which I did **not** resolve this round. `[inferred]` **Probe:** read `Startup.cs` `UseEndpoints`/conventional-route configuration and resolve `Route()`'s concrete path, then confirm whether it is reachable without any listener-token gate.
+
+### R-63.3 `[verified]` — the empty-table `Administrator` bootstrap is real but its reachability is untested
+
+`[inferred]` §2.4 describes the scenario structurally; **I did not run Covenant**, so I have not observed the exploit. `[inferred]` **Probe:** confirm `POST api/users` resolves on a fresh database with the user table empty, and that no `Startup` filter or seeding step guarantees a user exists before the endpoint is served.
+
+### R-63.4 `[read]` — three unauthenticated endpoints, one of them entirely unguarded
+
+`[verified]` §3.6: `POST users/login` and `POST users` (method `[AllowAnonymous]`), plus `HttpListenerController.Route()` (class `[AllowAnonymous]`). **The third is a whole controller; the first two are overrides on a gated class.** `[inferred]` **Probe:** whether any of the three is rate-limited or lockout-protected — `Startup` configures lockout flags but I did not trace them.
+
+### R-63.5 `[read]` — D40's other non-`Authorize` counts were spot-checked, not exhaustively re-derived
+
+`[verified]` §1.1 re-derived 13 figures. **D40 contains more.** `[verified]` **The four that moved are the four that used the corrupted denominator;** the remainder were re-derived and held, but I did not re-run every count in a 487-line report. `[inferred]` **Probe:** any D40 figure whose denominator involves "files containing an attribute" is suspect and should be re-run under §5.5's species ledger.
+
+### R-63.6 `[inferred]` — `CovenantHub`'s live-method count should be re-verified by a parser
+
+`[verified]` §3.5 relies on `CovenantHub.cs:162-165` sitting between two block comments (`*/` at `:161`, `/*` at `:166`) to call it live while 221 siblings are commented out. `[inferred]` **This is D32's finding reused, and I read it from source rather than from D32's text.** `[inferred]` **Probe:** run a comment-aware parser over `CovenantHub.cs` and confirm the live-method set has exactly one member.
+
 ---
 
 ## TOC
