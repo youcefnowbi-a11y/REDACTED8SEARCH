@@ -205,4 +205,152 @@ Compare-Object $outU $inU | Where-Object { $_.SideIndicator -eq '=>' }
 
 ---
 
-*(§2 follows)*
+## §2 — Q2: THE 61-DEFINES-VS-23-ROWS GAP (CLOSES D39 U1)
+
+### 2.1 Three corrections to the brief's framing, all measured
+
+**The brief says "62 `#define`s vs 23 dispatch entries. Which 39 are not dispatched?"** **Both numbers behave differently under exact measurement, and the gap is not 39.**
+
+**Correction A — 61, not 62.**
+
+```
+Get-Content Command.h | Select-String -Pattern '^\s*#define\s+(DEMON_COMMAND_[A-Z0-9_]+)\s+(\S+)'
+   → 62 matches
+```
+
+**But one of them is the include guard, not a command:**
+
+```c
+#ifndef DEMON_COMMAND_H
+#define DEMON_COMMAND_H
+```
+[source: `payloads/Demon/include/core/Command.h:1-2`]
+
+**`DEMON_COMMAND_H` matches the character class `DEMON_COMMAND_[A-Z0-9_]+` because `H` is a letter.** **The real count is 61.** **This is a substring artifact of exactly the kind the corpus rules warn about, and it fired on my own census before any conclusion was drawn from it.** **Fix applied: exclude the guard, and note it.**
+
+**Correction B — the table has 23 rows but only 22 IDs, because one row's ID is not `DEMON_COMMAND_`-prefixed.**
+
+```c
+SEC_DATA DEMON_COMMAND DemonCommands[] = {
+        { .ID = DEMON_COMMAND_SLEEP,                    .Function = CommandSleep                    },
+        ...
+        { .ID = DEMON_COMMAND_MEM_FILE,                 .Function = CommandMemFile                  },
+        { .ID = DEMON_EXIT,                             .Function = CommandExit                     },
+
+        // End
+        { .ID = 0, .Function = NULL }
+};
+```
+[source: `payloads/Demon/src/core/Command.c:16-42`, verbatim]
+
+**Rows:** `:17`–`:38` = **22 functional rows**, `:41` = **1 `NULL` sentinel** → **23 rows total.**
+
+**But `:38` is `.ID = DEMON_EXIT`, and `DEMON_EXIT` does not match `DEMON_COMMAND_`. So a census of `DEMON_COMMAND_*` table IDs returns 21, and D39's "62 vs 23" arithmetic is comparing a 62 against a row count that includes a non-`DEMON_COMMAND_` ID and a sentinel.** **D34's "23-entry table" is correct — it counts rows. The gap is measured against the wrong denominator unless that is stated.**
+
+**Correction C — the gap is 40, not 39, and none of the 40 is undispatched.**
+
+### 2.2 The classification: 61 defines, 21 in the table, 40 outside it, and every one consumed
+
+**Method — for each `DEMON_COMMAND_*` define not present in the table, find every occurrence in the agent tree and print the files:**
+
+```
+$tblIDs  = Command.c .ID = DEMON_* values  → 22
+$defs    = Command.h DEMON_COMMAND_* defines → 62 (incl. guard) → 61 real
+$notInTable = $defs | Where-Object { $tblIDs -notcontains $_ }
+foreach($d in $notInTable){ print $d and its occurrence files }
+```
+
+**Result — 41 rows printed, 40 real. Every single one has at least one consumer outside its own declaration. Not one is orphaned.**
+
+| Class | Count | Mechanism | Consumer |
+|---|---|---|---|
+| **A. Sub-command IDs** | **33** | second-level `switch` inside a command handler | `Command.c` only |
+| **B. BOF outcome codes** | **4** | returned by the Coffee loader | `CoffeeLdr.c` |
+| **C. Control sentinels** | **2** | guard (`NO_JOB`) and poll (`GET_JOB`) | `Package.c`, `Command.c`, `Demon.c` |
+| **D. Job-lifecycle notice** | **1** | emitted by the job scheduler | `Jobs.c` |
+| **E. Regex artifact** | **1** | the include guard, not a command | — |
+| | **41 printed / 40 real** | | |
+
+**The class assignment is by consumer file, printed — not by name shape:**
+
+```
+Class A (only src/core/Command.c):  33
+Class B (CoffeeLdr.c):               4   _INLINE_EXECUTE_EXCEPTION, _SYMBOL_NOT_FOUND, _RAN_OK, _COULD_NO_RUN
+Class C (other):                     2   _GET_JOB -> Package.c;  _NO_JOB -> Command.c + Demon.c
+Class D (Jobs.c):                    1   _JOB_DIED
+TOTAL non-table real defines:       40
+```
+
+[source: the per-define consumer classification run in §2.1; each class's members printed]
+
+**The 33 in Class A, each with exactly 2 occurrences — its declaration in `Command.h` and one `case` label in `Command.c`:**
+
+`DEMON_COMMAND_JOB_LIST`, `_JOB_SUSPEND`, `_JOB_RESUME`, `_JOB_KILL_REMOVE`, `_TRANSFER_LIST`, `_TRANSFER_STOP`, `_TRANSFER_RESUME`, `_TRANSFER_REMOVE`, `_PROC_MODULES`, `_PROC_GREP`, `_PROC_CREATE`, `_PROC_MEMORY`, `_PROC_KILL`, `_TOKEN_IMPERSONATE`, `_TOKEN_STEAL`, `_TOKEN_LIST`, `_TOKEN_PRIVSGET_OR_LIST`, `_TOKEN_MAKE`, `_TOKEN_GET_UID`, `_TOKEN_REVERT`, `_TOKEN_REMOVE`, `_TOKEN_CLEAR`, `_TOKEN_FIND_TOKENS`, `_FS_DIR`, `_FS_DOWNLOAD`, `_FS_UPLOAD`, `_FS_CD`, `_FS_REMOVE`, `_FS_MKDIR`, `_FS_COPY`, `_FS_MOVE`, `_FS_GET_PWD`, `_FS_CAT`
+
+[source: the Class A member list printed in the classification run — 33 rows, and I first wrote 34 in this table before the run corrected it]
+
+**And the structural proof that Class A is a second-level dispatch, not a stray label:**
+
+```c
+    switch ( Command )
+    {
+        case DEMON_COMMAND_FS_DIR: PUTS( "FS::Dir" )
+        {
+            LPWSTR           TargetFolder = NULL;
+```
+[source: `payloads/Demon/src/core/Command.c:682-686`]
+
+**This is `CommandFS`'s own `switch`, keyed on the sub-command ID parsed from the task buffer.** **`Command.c` contains 12 such switches:** `:196`, `:270`, `:682`, `:1163`, `:1310`, `:1381`, `:1872`, `:2117`, `:2472`, `:2622`, `:2749`, `:3088` [source: `Select-String '^\s*switch\s*\('`].
+
+### 2.3 The answer to Q2: it is a two-axis ID space, not 39 dead defines
+
+**The `DEMON_COMMAND_*` namespace encodes TWO levels of identifier in one prefix:**
+
+| Axis | Example | Value | Dispatched by |
+|---|---|---|---|
+| **Top level — the command** | `DEMON_COMMAND_FS` | `15` | the 23-row table, linear search `Command.c:113-122` |
+| **Second level — the sub-command** | `DEMON_COMMAND_FS_DIR` | `1` | the handler's own `switch`, e.g. `:682` |
+
+**The collision is the point: `DEMON_COMMAND_FS_DIR = 1` and `DEMON_COMMAND_TRANSFER_LIST = 0` and `DEMON_COMMAND_TOKEN_IMPERSONATE = 1` and `DEMON_COMMAND_JOB_LIST = 1` all reuse the same small integers.** [source: values from the `Command.h` dump in §2.1]
+
+**They cannot collide on the wire because the wire carries the top-level `CommandID` first, and only the top-level arm ever reads the sub-command.** **`Command.c:100-102` parses `CommandID`, `RequestID`, `TaskBuffer`; the table search at `:113-122` matches the top-level ID; the handler then parses `TaskBuffer` afresh and switches on the sub-command.**
+
+[source: `Command.c:100-122`, read in full in §1.4]
+
+**So:**
+- **The table is not short of entries; it is the top-level axis and it has all 22 of them.**
+- **The 40 defines outside it are the second level, plus 4 BOF codes, 2 sentinels, and 1 job notice.**
+- **Nothing is undispatched.** **The "62 vs 23" gap is an artifact of counting two namespaces as if they were one.**
+
+### 2.4 Where the two axes meet on the server — a fourth cross-check
+
+**The server mirrors the two-axis split exactly.** `commands.go` declares the top-level axis AND the sub-command axis in the same file:
+
+```
+COMMAND_PROC                     = 0x1010   // top level
+DEMON_COMMAND_PROC_MODULES       = 2        // sub, in the agent's namespace
+DEMON_COMMAND_PROC_GREP          = 3
+DEMON_COMMAND_PROC_CREATE        = 4
+DEMON_COMMAND_PROC_MEMORY        = 6
+```
+[source: `teamserver/pkg/agent/commands.go`; values match `Command.h:110-113` where `_PROC_MODULES=2, _PROC_GREP=3, _PROC_CREATE=4, _PROC_MEMORY=6`]
+
+**The server's `TaskDispatch` has the mirroring structure: a top-level `case COMMAND_PROC:` containing a nested `switch` on the sub-command** — D39 §4.5 measured 20 `default:`s in `TaskDispatch`, of which the ones at `:3920` (in `switch SubCommand`) name `COMMAND_PROC - Unknown`.
+
+**So both halves are two-axis, both live in one prefix namespace on the agent, and the top-level axis is the only one that reaches the dispatcher.** **Consistent across the wire.**
+
+### 2.5 Positive controls
+
+**Control 1 — does the occurrence search find consumers for defines that are definitely consumed?** Yes: **all 40 non-table defines returned ≥1 consumer, and the 21 table IDs were excluded by construction and separately confirmed present in the table.** **A search that could not find consumers would have returned `(NONE)` for at least some of the 40; it returned `(NONE)` for zero.**
+
+**Control 2 — the one `(NONE)`-looking row is demonstrably an artifact, not a dead define.** `DEMON_COMMAND_H` returned `uses=2 in include\core\Command.h` — its `#ifndef`/`#define` pair. **The source confirms it at `:1-2`.** **So the instrument found the guard, recognised it by reading, and excluded it — rather than silently counting it as a define.**
+
+**Control 3 — the sub-command claim is checked structurally, not by name shape.** The `switch ( Command )` at `:682` and the `case DEMON_COMMAND_FS_DIR:` at `:684` were read together. **A name that merely looks like a sub-command (`FS_*`) was not accepted as one; its enclosing switch was read.**
+
+### 2.6 Q2 verdict
+
+**The gap is not 39 undispatched commands. It is 40 defines on a second identifier axis, every one consumed, plus four non-command code families.** **Measured counts: 61 real `DEMON_COMMAND_*` defines, 21 of them in the 23-row table, 22 top-level IDs including `DEMON_EXIT`.** **No dead define found, so no D36 "capability present and unconnected" statement follows from this axis.** **Recorded plainly because the expected finding is absent.**
+
+---
+
+*(§3 follows)*
