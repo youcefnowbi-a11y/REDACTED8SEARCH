@@ -63,7 +63,7 @@ L83   MONITORENUMPROC = WINFUNCTYPE(INT, DWORD, DWORD, ...
 
 ---
 
-## §1 T1 — `hookfuncs.py` vs `security.py`: the contrast does not exist
+## §1 (T1) — `hookfuncs.py` vs `security.py`: the contrast does not exist
 
 ### §1.1 What `hookfuncs.py` actually is
 
@@ -175,9 +175,9 @@ for funcname, definition in _functions.items():
 
 ---
 
-## §3 T2 — `MemoryModule.c` and `jni_on_load.c`
+## §2 (T2) — `MemoryModule.c` and `jni_on_load.c`
 
-### §3.0 Boundary, justified
+### §2.0 Boundary, justified
 
 `MemoryModule.c` — `client\sources-windows-py3\MemoryModule.c`, **51,876 B on disk, 1,641 lines**, 50,236 bytes decoded as UTF-8.
 
@@ -185,7 +185,7 @@ for funcname, definition in _functions.items():
 
 **Line/byte note:** the decoded byte count differs from the on-disk size by 1,640 bytes. **`[instrument]`** — the file carries **CRLF line endings**, so every one of the 1,641 line splits consumes 2 bytes on disk but 1 in the decoded string. `1,641 × 1 = 1,641 ≈ 1,640` (final line unterminated). **Not a discrepancy, and I checked rather than assumed it.**
 
-### §3.1 The loader pipeline — seven stages, in order, with failure paths
+### §2.1 The loader pipeline — seven stages, in order, with failure paths
 
 `MemoryLoadLibraryEx` (`:971`) runs a fixed sequence. **Six of the seven stages `goto error` on failure; the seventh cannot fail.**
 
@@ -211,7 +211,7 @@ for funcname, definition in _functions.items():
 
 **This is fail-closed and it unwinds.** `MemoryFreeLibrary` (`:1310`) is the inverse of the load: it runs `DLL_PROCESS_DETACH` if `result->initialized` is set, frees the import table, and releases the code pages. **Because `result->initialized = TRUE` is set only at `:1173` after a successful entry-point call, a failure before that point frees memory without delivering a `DETACH` to a DLL that never received `ATTACH`** — the correct pairing.
 
-### §3.2 The five mechanisms, each with its API and its failure path
+### §2.2 The five mechanisms, each with its API and its failure path
 
 **1. Section mapping — `CopySections` (`:154`).**
 Copies each `IMAGE_SECTION_HEADER` from the file image to `codeBase + VirtualAddress`, and **commits** the destination range. **Failure → `FALSE` → `goto error` (`:1103`).** The loader maps sections at their **declared virtual addresses**, which is why the image must be allocated at the preferred base or relocated — the two are coupled, and stage 2's comment (`:1041-1043`) documents the coupling.
@@ -255,13 +255,13 @@ Reads `IMAGE_DIRECTORY_ENTRY_TLS`; if `VirtualAddress == 0` returns `TRUE` immed
 **5. Entry-point dispatch — `:1153-1174`.**
 Gated by three conditions: `!_ISSET(flags, MEMORY_LOAD_NO_EP)` **and** `result->isDLL` **and** `result->pcDllEntry` non-null. `isDLL` comes from `IMAGE_FILE_DLL` in the file header at load (`:1074`), so **an EXE payload never receives an entry-point call through this path** — its entry is reached by whatever calls it after `MemoryGetProcAddress`. The call is `pcDllEntry((HINSTANCE)code, DLL_PROCESS_ATTACH, reserved)` with `reserved` **forced to `NULL` under `MEMORY_LOAD_ALIASED`** (`:1166`). **Failure (`FALSE`) → `SetLastError(ERROR_DLL_INIT_FAILED)` → `goto error` (`:1169-1172`).** Only on success is `result->initialized = TRUE` set (`:1173`).
 
-### §3.3 Two more behaviours on the load path
+### §2.3 Two more behaviours on the load path
 
 **Headers are wiped on the success path only.** `:1178-1183`, guarded by `#ifndef DEBUG`, calls `CleanupHeaders(result)` (`:891`) **after** the entry point runs and **before** `cleanup:`. **A failed load retains its headers** — consistent with the `error:` path running `MemoryFreeLibrary` instead.
 
 **Header memory is committed, not reserved.** `:1089-1095` allocates `SizeOfHeaders` at `code` with `MEM_COMMIT, PAGE_READWRITE` and `memcpy`s the headers there. Combined with `CleanupHeaders` on success, this is the standard pe-to-mem pattern: **headers exist during load and are removed after.** `[inferred]` — the intent is read from the ordering, not from a comment stating it.
 
-### §3.4 The x64-vs-x86 asymmetry, and a `#if DEBUG` allocation that nobody ships
+### §2.4 The x64-vs-x86 asymmetry, and a `#if DEBUG` allocation that nobody ships
 
 **Machine-type validation is compile-time-selected** (`:1025-1032`): `_WIN64` requires `IMAGE_FILE_MACHINE_AMD64`, else `IMAGE_FILE_MACHINE_I386`. **A 64-bit build cannot load a 32-bit payload and vice versa — the loader fails closed with `ERROR_BAD_EXE_FORMAT` at `:1030`.** This is the same architecture-pinning the corpus recorded in D5 §3 and D14, appearing here as a **hard reject** rather than a degradation.
 
@@ -283,155 +283,150 @@ Gated by three conditions: `!_ISSET(flags, MEMORY_LOAD_NO_EP)` **and** `result->
 
 **This is why §3.2's latent defect is worth carrying rather than dismissing.** The relocation path is not an edge case in release builds; it is the only path.
 
-### §3.5 `jni_on_load.c` — not read in this pass
+### §2.5 `jni_on_load.c` — not read in this pass
 
 **`jni_on_load.c` (30,294 B) and the `_pupy_pyd_args_t` ABI were NOT read.** Both are within **task-16 (D6 §14)**, which is `in_progress` under this same owner, and writing them here as well would duplicate that lane. **The scope question is with the Lead.** Stated plainly rather than silently omitted: **T2's `MemoryModule.c` half is complete; T2's Android half and all of T3 are open.**
 
 ---
 
-## §4 T3 — the `_pupy_pyd_args_t` ABI
+## §3 (T3) — the `_pupy_pyd_args_t` ABI
 
-**Not closed in this pass.** As with §3.5, this is task-16's standing question, and it is the one item the earlier brief explicitly instructed **not** to infer: *"Do not infer a struct layout."*
+### §3.0 Boundary and method
 
-**What is established from files already read in this lane:** the ABI is the contract between `pupy_load.c` and `_pupy.pyd`, and `_pupy` is the native extension that supplies `find_function_address`, `reflective_inject_dll`, `ld_preload_inject_dll`, `mexec`, `set_exit_session_callback`, `_import_module`, `_load_dll` and `get_arch` to the Python layer (`agent\__init__.py:120-160`). **Every one of those is bound under a `hasattr` guard with a `_stub` fallback**, so the ABI's observable contract from the Python side is *"a set of optional capabilities, each independently absent-able."*
+**Method note, per the Lead's D56 warning:** every claim below comes from an **enumeration**, not a name filter. The type name was searched whole-tree (**5 sites**, §6.6), the `pupy.c` switch was **enumerated case-by-case** rather than filtered (**one switch, five cases, all five printed, no `default`** — §6.7), and the preprocessor census is a **per-file count of `#ifdef`/`#else`/`#endif`** (§6.8). A name-driven filter over a switch body silently dropped 2 of 30 cases in D56; this section does not use one.
 
-**That is a real constraint on the struct even without reading it:** the ABI must carry enough to satisfy all eight capabilities, and the Python side treats each as independently optional. **Stated as a constraint, not a layout.** The layout itself stays open pending the scope decision.
+**Scope note:** the Lead confirmed T3 belongs to D41 and retired task-16 as **superseded** (not complete). `D6_pupy_code.md` has **not** been touched. This section is the single home for this material.
 
----
+### §3.1 The struct — three fields, compile-time gated
 
-## §3 T2 — `MemoryModule.c` and `jni_on_load.c`
+**Defined in `pupy_load.h:10-14`, and the entire definition sits inside a preprocessor branch:**
 
-### §3.0 Boundary, justified
+```c
+typedef VOID (*on_exit_session_t)(VOID);          // :6
 
-`MemoryModule.c` — `client\sources-windows-py3\MemoryModule.c`, **51,876 B on disk, 1,641 lines**, 50,236 bytes decoded as UTF-8.
+#ifdef _PUPY_DYNLOAD                              // :8
 
-**The boundary is `MemoryLoadLibraryEx` (`:971-1206`, 236 lines), and it is justified because that single function is the loader's control flow.** Every mechanism the brief asks about is a direct call inside it, in a fixed order. The other 1,405 lines are the stage bodies, the resource API (`:1359-1641`), and `_MemoryGetProcAddress`/`MemoryFreeLibrary`. **I read the control flow in full plus the bodies of the five staged mechanisms; I did not read the resource-manager functions `_MemoryFindResourceW`/`_MemoryLoadString` (`:1359-1641`), which are not on the load path.**
+typedef struct _pupy_pyd_args {                   // :10
+    PVOID *pvMemoryLibraries;                     // :11
+    on_exit_session_t cbExit;                     // :12
+    BOOL blInitialized;                           // :13
+} _pupy_pyd_args_t;                               // :14
+#else                                             // :15
+void on_exit_session(void);                       // :16
+#endif                                            // :17
+```
 
-**Line/byte note:** the decoded byte count differs from the on-disk size by 1,640 bytes. **`[instrument]`** — the file carries **CRLF line endings**, so every one of the 1,641 line splits consumes 2 bytes on disk but 1 in the decoded string. `1,641 × 1 = 1,641 ≈ 1,640` (final line unterminated). **Not a discrepancy, and I checked rather than assumed it.**
+**Three fields. One in, one out, one handshake:**
 
-### §3.1 The loader pipeline — seven stages, in order, with failure paths
-
-`MemoryLoadLibraryEx` (`:971`) runs a fixed sequence. **Six of the seven stages `goto error` on failure; the seventh cannot fail.**
-
-| # | Stage | Call site | Failure behaviour |
+| Field | Type | Direction | Purpose |
 |---|---|---|---|
-| 0 | Input validation | `:993-1038` | `return NULL` directly (pre-`result`), `SetLastError` set |
-| 1 | Allocate image + `MEMORYMODULE` | `:1050-1070` | `goto cleanup` / `goto cleanup` — **`VirtualFree` first at `:1067`** |
-| 2 | Copy headers | `:1089-1099` | **unchecked** — `VirtualAlloc` return not tested |
-| 3 | `CopySections` | `:1102` | `goto error` |
-| 4 | `PerformBaseRelocation` | `:1107-1112` | records `result->isRelocated`, **does not `goto error`** |
-| 5 | `BuildResourceTables` | `:1115` | `goto error` |
-| 6 | `BuildImportTable` | `:1121` | `goto error` |
-| 7 | `FinalizeSections` | `:1128` | `goto error` |
-| 8 | `ExecuteTLS` | `:1133-1137` | `goto error` |
-| 9 | `RegisterExceptionTable` | `:1140-1145` | `goto error` (**x64 only**) |
-| 10 | `BuildExportTable` | `:1150` | **`void` — cannot fail** |
-| 11 | Entry point | `:1153-1174` | `goto error` on `DLL_PROCESS_ATTACH` returning FALSE |
+| `pvMemoryLibraries` | `PVOID *` | **caller → pyd** | array of already-loaded memory-module handles |
+| `cbExit` | `on_exit_session_t` | **pyd → caller** | exit callback the pyd installs |
+| `blInitialized` | `BOOL` | **pyd → caller** | success handshake |
 
-**The two failure exits are different and both are correct:**
+**The struct does not exist in a non-`_PUPY_DYNLOAD` build.** `:15-17` provides only an `on_exit_session` *function declaration* instead. So the ABI is **either binary-present or entirely absent by compile flag** — there is no partially-populated runtime variant to reason about. `[source]` — `pupy_load.h:8-17`.
 
-- **`cleanup:` (`:1185-1192`)** — reached by validation failures and the allocation failures. Unmaps the view and closes the mapping, then **returns `result`**, which is `NULL` on the validation paths and **non-NULL on the successful path**. This is the normal exit.
-- **`error:` (`:1194-1205`)** — reached by any stage failure. **Calls `MemoryFreeLibrary(result)` (`:1197`) to unwind, then unmaps and closes, then `return NULL`.**
+### §3.2 The writer — `pupy_load.c`, all three fields set, one read back
 
-**This is fail-closed and it unwinds.** `MemoryFreeLibrary` (`:1310`) is the inverse of the load: it runs `DLL_PROCESS_DETACH` if `result->initialized` is set, frees the import table, and releases the code pages. **Because `result->initialized = TRUE` is set only at `:1173` after a successful entry-point call, a failure before that point frees memory without delivering a `DETACH` to a DLL that never received `ATTACH`** — the correct pairing.
-
-### §3.2 The five mechanisms, each with its API and its failure path
-
-**1. Section mapping — `CopySections` (`:154`).**
-Copies each `IMAGE_SECTION_HEADER` from the file image to `codeBase + VirtualAddress`, and **commits** the destination range. **Failure → `FALSE` → `goto error` (`:1103`).** The loader maps sections at their **declared virtual addresses**, which is why the image must be allocated at the preferred base or relocated — the two are coupled, and stage 2's comment (`:1041-1043`) documents the coupling.
-
-**2. Relocation — `PerformBaseRelocation` (`:368`).**
-Walks `IMAGE_DIRECTORY_ENTRY_BASERELOC`, and per block computes `type = *relInfo >> 12` and `offset = *relInfo & 0xfff` (`:391-393`) — **the standard 4-bit-type/12-bit-offset split.** `IMAGE_REL_BASED_ABSOLUTE` is skipped (`:397-399`); `IMAGE_REL_BASED_HIGHLOW` adds `delta` to a 32-bit location (`:401-405`); `IMAGE_REL_BASED_DIR64` handles 64-bit (`:408-409`, `_WIN64` only).
-
-**This is the one stage that does NOT `goto error`, and the reason is a design choice worth naming.** `:374-376`:
+`initialize()` declares the struct **under the same flag** (`pupy_load.c:230-232`), then at `:378-395`:
 
 ```c
-if (directory->Size == 0) {
-    return (delta == 0);
-}
+#ifdef _PUPY_DYNLOAD
+    dprint("_pupy built with dynload\n");
+
+    args.pvMemoryLibraries = MyGetLibraries();     // :381  populate
+    args.cbExit = NULL;                            // :382  CLEARED before the call
+    args.blInitialized = FALSE;                    // :383  CLEARED before the call
+
+    dprint("Load _pupy\n");
+    HMODULE pupyhMod = xz_dynload(
+        "_pupy.pyd",
+        _pupy_pyd_c_start, _pupy_pyd_c_size,
+        &args                                      // :389  BY REFERENCE
+    );
+
+    if (args.blInitialized != TRUE) {              // :392  HANDSHAKE CHECK
+        dprint("_pupy.pyd initialization failed\n");
+        return;                                    // :394  BAIL OUT
+    }
 ```
 
-and at the call site `:1107-1112`, the result is **recorded, not tested**:
+**Four properties, each load-bearing:**
+
+1. **`&args` is passed by reference** (`:389`) — the pyd mutates the caller's struct. This is an **out-parameter ABI**, not a value copy.
+2. **All three fields are explicitly initialised before the call** (`:381-383`), including **`cbExit = NULL` and `blInitialized = FALSE`**. Both pyd-written fields are **cleared to a known-failed state first**, so an untouched struct reads as *"not initialised"* — the safe default.
+3. **`blInitialized` is the sole success discriminator** (`:392`), and on failure `initialize()` **`return`s early** (`:394`) — **the `PyInit__pupy` call at `:403` is never reached.**
+4. **`xz_dynload`'s return is used without a null check.** `pupyhMod` is assigned at `:386` and passed to `MyGetProcAddress` at `:399` **with no test on `pupyhMod`**. `[source]` — the binding is unconditional; whether `MyGetProcAddress` validates internally is a residual (§5.5).
+
+### §3.3 The reader — `pupy.c` DllMain, and the pointer-range guard
+
+The pyd reads the struct in `DllMain` (`pupy.c:493-524`), at `DLL_PROCESS_ATTACH`:
 
 ```c
-locationDelta = (SIZE_T)(code - old_header->OptionalHeader.ImageBase);
-if (locationDelta != 0) {
-    result->isRelocated = PerformBaseRelocation(result, locationDelta);
-} else {
-    result->isRelocated = TRUE;
-}
+case DLL_PROCESS_ATTACH:                           // :503
+    hAppInstance = hinstDLL;                       // :504
+    if (lpReserved > 0xFFFF) {                     // :505  RANGE GUARD
+        _pupy_pyd_args_t *args =
+                (_pupy_pyd_args_t*) lpReserved;    // :506-507  CAST
+
+        if (args->pvMemoryLibraries) {             // :509  NULL-CHECKED
+                MySetLibraries(args->pvMemoryLibraries);   // :510
+        }
+
+        args->cbExit = on_exit_session;            // :513  WRITE BACK
+        args->blInitialized = TRUE;                // :514  HANDSHAKE
+    }
+    return TRUE;                                   // :516
 ```
 
-**A `FALSE` return means the image has a relocation directory but could not be applied at a non-zero delta** — an image that is **now silently broken at every relocated address**, and the loader **continues**. `isRelocated` is stored on the module (`:1109`) and **never tested on the load path.** `[measured]` — the flag is written at `:1109`/`:1111` and read nowhere in this file.
+**`:505` `if (lpReserved > 0xFFFF)` is the most interesting line in this ABI, and it is a discriminator, not a validity check.**
 
-**This is the strongest defect candidate in `MemoryModule.c`, and it is marked `latent`, not `live`:** the outcome is a load that *appears* to succeed while returning a module whose absolute addresses are wrong, which would fault on first call rather than at load. **Liveness depends on whether a real payload is ever loaded at a non-preferred base with relocations present** — not established here, and not demonstrable from source alone. Carried as residual §5.4.
+`lpReserved` is `DllMain`'s third parameter, whose documented meaning varies by load mechanism. Under a **normal `LoadLibrary`** it is `NULL` for a dynamic load and non-`NULL` for a static load. Under a **reflective/manual mapper** it is whatever the mapper passes — here, **the caller's `&args` pointer** (`pupy_load.c:389`).
 
-**3. Import resolution — `BuildImportTable` (`:520`).**
-For each import descriptor, loads the named DLL and resolves each `IMAGE_IMPORT_BY_NAME` to an address, writing the IAT in place. The hook surface is `GetHooks` (`:505`) and `ImportHooks`, and the export-name policy is `isAllowedSymbol` (`:749`) — both part of this repo's additions to the upstream library.
+**`0xFFFF` is a heuristic boundary between "a small integer Windows might pass" and "an address in user space."** On 32-bit Windows any legitimate user-mode address exceeds `0xFFFF`. The guard therefore reads as: *"treat `lpReserved` as our struct only if it is plausibly a pointer."*
 
-**Failure → `FALSE` → `goto error` (`:1122`).** **This is the one stage where the process's real DLL loader is engaged** — the in-memory module's imports resolve against genuine system DLLs, so an import of a DLL absent from the host fails the load. Fail-closed.
+**This is fail-safe, and the two ends agree.** A non-null `lpReserved` that is a small integer is skipped, and the pyd **still returns `TRUE`** (`:516`) **without setting `blInitialized`** — so the caller sees the handshake fail and bails at `pupy_load.c:392`. **An unrecognised `lpReserved` produces a clean failure at the caller rather than a misinterpreted struct.** Good design, recorded as such.
 
-**4. TLS callbacks — `ExecuteTLS` (`:340`).**
-Reads `IMAGE_DIRECTORY_ENTRY_TLS`; if `VirtualAddress == 0` returns `TRUE` immediately (`:348-351`, with the `"No TLS callbacks.."` trace). Otherwise walks `tls->AddressOfCallBacks` and **invokes each callback directly**, `DLL_PROCESS_ATTACH`, `NULL` reserved (`:358-362`). Returns `TRUE` unconditionally after the walk.
+**The residual is the false-positive direction:** an `lpReserved` above `0xFFFF` that is **not** our struct — e.g. a legitimate large non-null `lpReserved` from a static load — **would be cast and dereferenced at `:509`, then written at `:513-514`.** `[inferred]` — this requires `_pupy.pyd` to be loaded by a mechanism passing a large non-null `lpReserved` while `_PUPY_DYNLOAD` is in effect. Carried as residual §5.6. **Not claimed as exploitable:** it needs a load path not observed here, and the shipped path (`xz_dynload`, `:386`) passes a genuine struct.
 
-**This stage CANNOT report failure.** `:364` returns `TRUE` on every path, and the call site `:1133-1137` does `goto error` on a return that is never `FALSE`. **A TLS callback that faults takes the process down inside its own entry; there is no error return to observe.** The only control is the flag test `_ISSET(flags, MEMORY_LOAD_NO_TLS_CALLBACKS)` at `:1133`, which skips the stage entirely. **The comment at `:1132` — "TLS callbacks are executed BEFORE the main loading" — is the author's claim, and the code confirms the ordering: `ExecuteTLS` at `:1134` precedes the entry point at `:1164`.** `[source]` — verified by call order, not by the comment.
+### §3.4 Size-mismatch behaviour — the structural answer
 
-**5. Entry-point dispatch — `:1153-1174`.**
-Gated by three conditions: `!_ISSET(flags, MEMORY_LOAD_NO_EP)` **and** `result->isDLL` **and** `result->pcDllEntry` non-null. `isDLL` comes from `IMAGE_FILE_DLL` in the file header at load (`:1074`), so **an EXE payload never receives an entry-point call through this path** — its entry is reached by whatever calls it after `MemoryGetProcAddress`. The call is `pcDllEntry((HINSTANCE)code, DLL_PROCESS_ATTACH, reserved)` with `reserved` **forced to `NULL` under `MEMORY_LOAD_ALIASED`** (`:1166`). **Failure (`FALSE`) → `SetLastError(ERROR_DLL_INIT_FAILED)` → `goto error` (`:1169-1172`).** Only on success is `result->initialized = TRUE` set (`:1173`).
+The brief asks what happens on a size mismatch. **There is no version field, no size field, and no magic value** (`pupy_load.h:10-14`), so a mismatch cannot be detected by the ABI itself. What happens is decided by the **compile flag**, and the flag is the real contract:
 
-### §3.3 Two more behaviours on the load path
+- **Both sides `_PUPY_DYNLOAD`** — struct exists on both sides, matching layout. **Correct.**
+- **Caller without, pyd with** — `pupy_load.c` never declares `args` (gated at `:230-232`) and takes the `#else` branch, calling `PyInit_pupy()` directly (`:421`). The pyd has the type but is never handed one, so `DllMain` sees a normal `lpReserved` and **skips `:505`**, returning `TRUE` with `blInitialized` untouched and never read. **Degraded but not miscompiled.**
+- **Caller with, pyd without** — `initialize()` populates all three fields, passes `&args`, then **waits for `args.blInitialized != TRUE`** (`:392`). A pyd without the reader never sets it, so **`initialize()` returns early at `:394` and the interpreter never initialises.** **Fail-closed.**
 
-**Headers are wiped on the success path only.** `:1178-1183`, guarded by `#ifndef DEBUG`, calls `CleanupHeaders(result)` (`:891`) **after** the entry point runs and **before** `cleanup:`. **A failed load retains its headers** — consistent with the `error:` path running `MemoryFreeLibrary` instead.
+**So the mismatch story is: the ABI is all-or-nothing by compile flag, and every mixed combination fails closed rather than corrupting.** That is why the `blInitialized` handshake exists at all — **without it, the third case would silently proceed to call `PyInit__pupy` on a pyd that never received its libraries.**
 
-**Header memory is committed, not reserved.** `:1089-1095` allocates `SizeOfHeaders` at `code` with `MEM_COMMIT, PAGE_READWRITE` and `memcpy`s the headers there. Combined with `CleanupHeaders` on success, this is the standard pe-to-mem pattern: **headers exist during load and are removed after.** `[inferred]` — the intent is read from the ordering, not from a comment stating it.
+**Layout-identity caveat, stated not assumed:** the struct crosses **two separately-compiled binaries by pointer**, so its layout is fixed by their ABIs and not by any wire encoding. Both are built from this tree by `build-docker.sh`, so layouts agree **by construction, not by negotiation**. `[inferred]` — I did not verify build flags for both artifacts; the `.pyd` is not in this tree (§6.9).
 
-### §3.4 The x64-vs-x86 asymmetry, and a `#if DEBUG` allocation that nobody ships
+### §3.5 The exit callback — one name, two directions, and why `cbExit = NULL` is not redundant
 
-**Machine-type validation is compile-time-selected** (`:1025-1032`): `_WIN64` requires `IMAGE_FILE_MACHINE_AMD64`, else `IMAGE_FILE_MACHINE_I386`. **A 64-bit build cannot load a 32-bit payload and vice versa — the loader fails closed with `ERROR_BAD_EXE_FORMAT` at `:1030`.** This is the same architecture-pinning the corpus recorded in D5 §3 and D14, appearing here as a **hard reject** rather than a degradation.
+The pyd writes `cbExit` as `on_exit_session` (`pupy.c:513`), and the caller immediately stores it (`pupy_load.c:418` `on_exit_session_cb = args.cbExit;`). That static then runs from **two independent triggers**:
 
-**`:1040-1048` is the interesting one.** The preferred-base allocation is wrapped in `#if DEBUG`:
+- **`OnThreadCrash`** (`pupy_load.c:202-206`) — guarded `if (on_exit_session_cb && !on_exit_session_called)`, sets `on_exit_session_called = TRUE` (`:205`), calls it (`:206`).
+- **The window procedure's exit message** (`:468-471`) — same guard, same single-shot flag.
 
-```c
-#if DEBUG
-    code = (unsigned char *)VirtualAlloc((LPVOID)(old_header->OptionalHeader.ImageBase),
-        old_header->OptionalHeader.SizeOfImage,
-        MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-#endif
+**The `on_exit_session_called` flag (`:33`) makes the callback idempotent across both paths** — a crash and a clean exit cannot both fire it. Correct and deliberate.
 
-    if (code == NULL) {
-        // try to allocate memory at arbitrary position
-        code = (unsigned char *)VirtualAlloc(NULL, ...);
-```
+**And `args.cbExit = NULL` at `:382` is not redundant with `blInitialized = FALSE`.** It initialises the field that becomes `on_exit_session_cb` (`:418`) to null, so that **if the pyd returns without writing it, the stored callback is null and both guarded call sites skip** (`:202`, `:469` each test for non-null). **The clearing at `:382` is what makes those guards reachable in the failure case** — a caller that skipped it would store an uninitialised value and a guard could pass on garbage.
 
-**In a release build `code` is still `NULL` at `:1050`, so the preferred-base attempt is compiled out and every release load takes the arbitrary-position branch.** That means **`locationDelta != 0` is the normal case in a release build** (`:1107`), which is precisely the condition under which stage 4's untested `PerformBaseRelocation` return matters. **The `#if DEBUG` guard converts "try preferred base, fall back" into "always relocate" for every shipped binary.** `[source]` for the guard; `[inferred]` for the consequence, which follows from `code == NULL` at `:1050` in a non-`DEBUG` build.
+### §3.6 What the Python layer sees of this ABI
 
-**This is why §3.2's latent defect is worth carrying rather than dismissing.** The relocation path is not an edge case in release builds; it is the only path.
+`_pupy` supplies eight capabilities to Python — `find_function_address`, `reflective_inject_dll`, `ld_preload_inject_dll`, `mexec`, `set_exit_session_callback`, `_import_module`, `_load_dll`, `get_arch` — and **every one is bound under a `hasattr` guard with a `_stub` fallback** (`agent\__init__.py:120-160`). **The ABI struct itself is never visible to Python**: it is consumed entirely inside `DllMain` during load, and Python only ever sees the resulting module attributes. So the struct's contract is **native-to-native only**, and the Python-side `hasattr` pattern is a *separate, later* capability-negotiation layer.
 
-### §3.5 `jni_on_load.c` — not read in this pass
-
-**`jni_on_load.c` (30,294 B) and the `_pupy_pyd_args_t` ABI were NOT read.** Both are within **task-16 (D6 §14)**, which is `in_progress` under this same owner, and writing them here as well would duplicate that lane. **The scope question is with the Lead.** Stated plainly rather than silently omitted: **T2's `MemoryModule.c` half is complete; T2's Android half and all of T3 are open.**
+**Worth stating because it corrects a natural assumption:** the eight optional capabilities are **not** fields in `_pupy_pyd_args_t`. The struct carries three things (libraries in, callback out, handshake); the capability set is discovered afterwards by `hasattr` on the imported module. **Two different negotiation mechanisms at two different times**, and conflating them would misread the ABI's size.
 
 ---
 
-## §4 T3 — the `_pupy_pyd_args_t` ABI
-
-**Not closed in this pass.** As with §3.5, this is task-16's standing question, and it is the one item the earlier brief explicitly instructed **not** to infer: *"Do not infer a struct layout."*
-
-**What is established from files already read in this lane:** the ABI is the contract between `pupy_load.c` and `_pupy.pyd`, and `_pupy` is the native extension that supplies `find_function_address`, `reflective_inject_dll`, `ld_preload_inject_dll`, `mexec`, `set_exit_session_callback`, `_import_module`, `_load_dll` and `get_arch` to the Python layer (`agent\__init__.py:120-160`). **Every one of those is bound under a `hasattr` guard with a `_stub` fallback**, so the ABI's observable contract from the Python side is *"a set of optional capabilities, each independently absent-able."*
-
-**That is a real constraint on the struct even without reading it:** the ABI must carry enough to satisfy all eight capabilities, and the Python side treats each as independently optional. **Stated as a constraint, not a layout.** The layout itself stays open pending the scope decision.
-
----
-
-
-
-## §2 T4 — the `ecpv` KEX: fail-CLOSED, three layers deep
+## §4 (T4) — the `ecpv` KEX: fail-CLOSED, three layers deep
 
 **The brief's highest-severity question: is there a path where the peer is not authenticated?**
 
 **Answer: no such path exists in this code, and the reason is structural rather than a check that could fail open.** The expected finding — the expected fail-open — is **not present**. This is the same shape as msf-diver's D54 result: the bug that was expected is not there, and the correct report says so.
 
-### §2.1 Layer 1 — the peer key is a CONSTRUCTOR ARGUMENT, never a wire field
+### §4.1 Layer 1 — the peer key is a CONSTRUCTOR ARGUMENT, never a wire field
 
 The decisive structural property. Every one of the **five** `ECPV` construction sites in the tree supplies key material at object-construction time:
 
@@ -456,7 +451,7 @@ if not self.pubkey and not self.privkey:
 
 **A missing key raises at construction, before any transport state exists.** That is fail-closed by exception at the earliest possible point — not a later predicate that could be skipped.
 
-### §2.2 Layer 2 — the KEX is authenticated by a Schnorr-style commitment
+### §4.2 Layer 2 — the KEX is authenticated by a Schnorr-style commitment
 
 The exchange is EC-ElGamal (ECIES) over a Brainpool curve, with a commitment binding the sender to its ephemeral key.
 
@@ -498,7 +493,7 @@ return self.decrypt(r, nonce, key=key)
 
 **Both failure paths return `None` rather than raising:** `unpack:239` on `t` out of range, and `unpack:242` on the point-at-infinity check. **A failed verification yields `None`, which downstream must handle** — and `decrypt` at `:355` layers a further `None` return on a padding mismatch. *"Returns None on failure"* is a fail-closed contract, though it shifts the burden to the caller: a caller that does not test for `None` will raise `TypeError` rather than silently accept. See §5.1 for the residual.
 
-### §2.3 Layer 3 — the response is verified before the shared key is set
+### §4.3 Layer 3 — the response is verified before the shared key is set
 
 `process_kex_response` (`ecpv.py:264-274`):
 
@@ -529,7 +524,7 @@ if not list(key) == list(reversed(key2)):
 
 **This is a verification harness, not a claim.** `[source]` — `ecpv.py:370-412` is an `if __name__ == '__main__':` self-test exercising `generate_key`, `pack`/`unpack`, `encrypt`/`decrypt`, `encode`/`decode` byte-precise, plus the KEX round trip. It is strong evidence the KEX is live and exercised, though **the harness was not executed in this lane** (no execution, §6.5) — so it is evidence of intent and coverage, not a passing test run.
 
-### §2.4 The `process_kex_request` caching path — and why it is not a bypass
+### §4.4 The `process_kex_request` caching path — and why it is not a bypass
 
 `process_kex_request` (`:252-262`) short-circuits:
 
@@ -542,7 +537,7 @@ if request == self._cached_kex_request and self._kex_shared_key:
 
 **Marked `latent`, not `live`.** The cache is an idempotence optimisation whose security depends on the request being unpredictable (`_gen_random()` at `:204`, `:248`). Not currently exploitable on the evidence read here. Recorded as a **residual with a probe** (§5.2), because establishing non-exploitability would require tracking the client's request-generation path, which is outside the files read in full.
 
-### §2.5 Two asymmetries worth naming
+### §4.5 Two asymmetries worth naming
 
 **`check_csum`/`gen_csum` disagree on key index — correctly.** `gen_csum` (`:292-297`) selects `self._kex_shared_key[0]`; `check_csum` (`:276-281`) selects `self._kex_shared_key[1]`. Since `[1]` is `_reversed_bytes([0])`, that is **intentional** — each direction keys with its own half. **Not a defect.** Recorded because it reads as an inconsistency at a glance and the next reader will otherwise stop on it.
 
@@ -550,7 +545,4 @@ if request == self._cached_kex_request and self._kex_shared_key:
 
 ---
 
-
-
 ---
-
