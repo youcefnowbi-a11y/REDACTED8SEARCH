@@ -203,3 +203,210 @@ ThemeApiController.cs:16:          [ApiController, Route("api/themes"), Authoriz
 `[read]` D40's 233-count is **not repeated here.** §2.1 is a fresh, independent measurement of a different surface (controllers, not hub classes), and it agrees with D13 on 17 controllers / 183 actions. Cross-reference only.
 
 ---
+
+## 3. Q3: the task library
+
+### 3.1 The count, and the boundary that justifies it
+
+**The brief asks for the boundary, not the count.** The boundary is: **a task definition is a YAML sequence entry at indentation level 0 whose first key is `Name`.** `[read]`
+
+**Why that is the right boundary — the discriminating evidence:**
+
+```yaml
+# Data/Tasks/DefaultGruntTasks.yaml — boundary witness
+L1:  - Name: Help                    ← task definition begins (indent 0)
+L2:    Aliases: []
+L9:    Language: CSharp
+L18:   Options:                      ← nested list begins
+L19:   - Name: TaskName              ← indent 2 — an OPTION, not a task
+L22:     Description: ...
+L30: - Name: PowerShellImport        ← next task definition (indent 0)
+```
+
+`[verified]` **The negative control proves the boundary discriminates:** in `DefaultGruntTasks.yaml`, `^-\s*Name:` matches **23** (tasks) and `^\s+-\s*Name:` matches **115** (options). **Same lexical token, two different species, separated only by leading whitespace.** A detector that counted `- Name:` without anchoring indentation would return **138** for this one file and be wrong by 6×. `[read]`
+
+| File | Task definitions (indent-0 `- Name:`) |
+|---|---|
+| DefaultGruntTasks.yaml | 23 |
+| DotNetCore.yaml | 13 |
+| GhostPack.yaml | 6 |
+| SharpSC.yaml | 1 |
+| SharpSploit.Credentials.yaml | 15 |
+| SharpSploit.Enumeration.yaml | 16 |
+| SharpSploit.Evasion.yaml | 1 |
+| SharpSploit.Execution.yaml | 9 |
+| SharpSploit.LateralMovement.yaml | 6 |
+| SharpSploit.Persistence.yaml | 4 |
+| SharpSploit.PrivilegeEscalation.yaml | 1 |
+| **TOTAL (11 files)** | **95** |
+
+`[verified]` **95 task definitions across 11 YAML files.** Second instrument: 11 files confirmed by directory listing of `Data/Tasks/` with `-Filter *.yaml`. `[verified]`
+
+### 3.2 The task-type axis — 10 types, one of them 95% of the library
+
+`[read]` `Models/Grunts/GruntTasking.cs:63-75`:
+
+```csharp
+public enum GruntTaskingType
+{
+    Assembly, SetDelay, SetJitter, SetConnectAttempts, SetKillDate,
+    Exit, Connect, Disconnect, Tasks, TaskKill
+}
+```
+
+`[read]` **10 tasking types. `GruntTask.TaskingType` defaults to `Assembly`** (`Models/Grunts/GruntTask.cs:39` and `:413`). `[read]` Enumerating the 11 YAML files for an explicit `TaskingType:` key finds **none** — every task in the library is `Assembly` by default. `[verified]` **So 95 task definitions → 95 `Assembly` taskings; the other 9 types are control-plane messages the server generates itself, not library tasks.**
+
+`[read]` Enumerating where the server **sets** a non-Assembly type returns exactly four sites, all in `Core/CovenantService.cs`:
+
+| Line | Type | Parameters |
+|---|---|---|
+| **L1328-1329** | `SetConnectAttempts` | `new List<string> { "ConnectAttempts", grunt.ConnectAttempts.ToString() }` |
+| **L1357-1358** | `SetDelay` | `new List<string> { "Delay", grunt.Delay.ToString() }` |
+| **L1386-1387** | `SetJitter` | `new List<string> { "JitterPercent", grunt.JitterPercent.ToString() }` |
+| **L1415-1416** | `SetKillDate` | `new List<string> { "KillDate", grunt.KillDate.ToString() }` |
+
+`[verified]` **Four sites, four types. `Exit`, `Connect`, `Disconnect`, `Tasks`, `TaskKill` are constructed elsewhere or by string — see §6. `Assembly` is every YAML task.**
+
+### 3.3 Does the server validate parameters before dispatch? — presence yes, type no
+
+`[read]` The gate is **`Core/CovenantService.cs:2472 ParseParametersIntoTask(GruntTask task, List<ParsedParameter> parameters)`**, called from `InteractGrunt` at **`CovenantService.cs:1746`**. `[read]` Full body read; it performs **four** checks and nothing else:
+
+| Check | Line | What it validates |
+|---|---|---|
+| Parameter count ≥ required-option count | L2475 | **presence** (`!O.Optional`) |
+| Labeled parameter matches an option name (case-insensitive) | L2487 | **presence of a name** |
+| Unlabeled parameters fill unassigned non-file slots in order | L2498-2512 | **positional assignment** |
+| No required option left unassigned | L2517-2527 | **presence** |
+
+`[read]` **Returns `null` on success, a usage string on failure.** `[verified]`
+
+`[read]` **What it does NOT do: no type check, no range check, no format check, no regex, no length bound, no allow-list.** Every value is assigned as a **raw `string`** at `L2490 nextOption.Value = parameters[i].Value;` and `L2490 option.Value = parameters[i].Value;`. `[verified]` **The only typed value in the function is the count comparison at L2475.**
+
+`[inferred]` **The server validates that the operator supplied the right NUMBER of things. It does not validate that any of them is the right KIND of thing.** A `SetDelay`-style numeric option accepts `"banana"` at this gate. Whether that matters depends on §4 — and there, it does.
+
+---
+
+## 4. Q4: what runs where
+
+### 4.1 The split, per the source
+
+| Stage | Artifact | What happens |
+|---|---|---|
+| **SERVER — validation** | `CovenantService.cs:2472` | presence/position only (§3.3) `[read]` |
+| **SERVER — state apply** | `CovenantService.cs:2954`, `:2971` | `int.TryParse(Parameters[0])` / `DateTime.TryParse(Parameters[0])` `[read]` |
+| **SERVER — serialization** | `InternalListener.cs:200 GetGruntTaskingMessage` | base64 each parameter, join with `,` (Assembly); **raw join, NO base64** (else) `[read]` |
+| **WIRE** | `InternalListener.cs:386` → `CreateMessageForGrunt` | encrypted `GruntEncryptedMessage` wrapping `GruntTaskingMessage` `[read]` |
+| **TARGET — decode** | `GruntHTTP.cs` / `Brute.cs` / `GruntBridge.cs` / `GruntSMB.cs` | `message.Message.Split(',')`, then per-piece handling `[read]` |
+| **TARGET — apply** | same files, ~L104-152 | `int.TryParse(message.Message)` / `DateTime.TryParse(message.Message)` `[read]` |
+
+`[read]` **The serialization at `InternalListener.cs:203-233`, verbatim:**
+
+```csharp
+if (tasking.Type == APIModels.GruntTaskingType.Assembly)
+{
+    // :210 — EACH parameter base64'd INDIVIDUALLY, then joined with ','
+    Message += "," + String.Join(",", tasking.Parameters.Select(P => Convert.ToBase64String(
+        Common.CovenantEncoding.GetBytes(P))));
+}
+else
+{
+    // :232 — RAW join, no encoding at all
+    Message = string.Join(",", tasking.Parameters);
+}
+```
+
+### 4.2 THE CROSS-BOUNDARY DEFECT
+
+**The brief asks: *"is there a task whose server-side and target-side assumptions disagree — a parameter the server validates as one type and the grunt consumes as another, or a server-side precondition the grunt does not check."***
+
+`[verified]` **Yes. It is the four control taskings, and the disagreement is a LABEL at index 0 that no consumer skips.**
+
+**Build the message for `SetDelay`.** `CovenantService.cs:1358` constructs `Parameters = new List<string> { "Delay", grunt.Delay.ToString() }`. `[read]` That list flows to `GetGruntTaskingMessage`, takes the **`else` branch at `:232`** (because `Type != Assembly`), and produces:
+
+```
+Message = "Delay,300"
+```
+
+**Now both consumers read index 0 as the value:** `[verified]`
+
+| Consumer | Code | Result |
+|---|---|---|
+| **Client-side (operator console)** `CovenantService.cs:2954` | `tasking.Parameters.Count >= 1 && int.TryParse(tasking.Parameters[0], out int n)` → parses **`"Delay"`** | **FAILS.** No assignment. Silent. `[read]` |
+| **Target-side (implant)** `GruntHTTP.cs:106` | `int.TryParse(message.Message, out int val)` → parses **`"Delay,300"`** | **FAILS.** Outputs `"Error parsing: Delay,300"`. `[read]` |
+
+`[read]` **Neither consumer strips the label.** Enumerated every `Parameters.Skip` / `Parameters.RemoveAt` / `Parameters[0]` site in the tree: the only `Skip(1)` calls are at `CovenantService.cs:1740` (grunt note) and `:2474` (`ParseParametersIntoTask`, which operates on the operator's *typed command line*, not this list). **Nothing skips index 0 for a control tasking.** `[verified]`
+
+`[inferred]` **The server writes a label into a positional slot and every reader treats the slot as a value.** Both sides fail, both fail **silently**, and they fail **for the same reason** — so the bug is invisible from either end alone. The operator sees the command "succeed" (the tasking is created, dispatched, and the tasking row is written); the grunt reports a parse error the operator may never read.
+
+### 4.3 The secondary defect — the `else` branch has no encoding contract
+
+`[read]` `InternalListener.cs:232` sends **raw, unencoded** parameters, while every grunt transport decodes positionally:
+
+```csharp
+// Data/Grunt/GruntHTTP/GruntHTTP.cs (and Brute/GruntBridge/GruntSMB identically)
+string[] pieces = message.Message.Split(',');
+for (int i = 1; i < pieces.Length; i++) { parameters[i-1] = Encoding.UTF8.GetString(Convert.FromBase64String(pieces[i])); }
+byte[] compressedBytes = Convert.FromBase64String(pieces[0]);
+```
+
+`[read]` **All four transports assume `pieces[0]` is a base64 *assembly* and `pieces[i>0]` are base64 *parameters*.** `[verified]` **That assumption is true only on the `Assembly` branch.** On the `else` branch the message is `"Delay,300"` — `pieces[0]` = `"Delay"` is not base64, and `pieces[1]` = `"300"` is not base64.
+
+`[inferred]` **The transports and the control taskings disagree about the wire format itself.** The `else` branch at `:232` appears to expect a *different* framing than the transports implement. `[inferred]` This is consistent with the control taskings being read by a **separate, earlier code path** in the grunt — `int.TryParse(message.Message)` on the whole string, before any split. §4.4 records what I could and could not establish about which path wins.
+
+### 4.4 What I could NOT establish, stated honestly
+
+`[read]` The grunt's `GruntHTTP.cs:104-152` handles control types by parsing **`message.Message` as a whole**. The transports' `Split(',')` + `FromBase64String` path is a different region of the same file. **Both are present.** Which executes for a given `message.Type` depends on the branch taken at `:104`, and I did not trace the full control flow to a single entry point for all four transports. `[absence]` — **searched: the four transport files' type branches; positive control NOT established for the control-flow claim.** **I therefore assert the two mismatches in §4.2 as read facts (`[read]`/`[verified]` — the code says what it says) and mark the *consequence* chain as `[inferred]`.** See §6.1 for the probe that would close it.
+
+---
+
+## 5. Instrument record
+
+**Mandatory. This lane's record, continued from D20 §6.2 and D32 §6.** Four failures now, one root cause: **a probe whose shape does not match the evidence's shape.**
+
+| # | Where | Failure | Correction | Rule |
+|---|---|---|---|---|
+| **9** | D13 §7.2 | member-surface regex character class **excluded digits** → reported **178** for a **183**-member surface | class widened to `[A-Za-z0-9_]` | *A count is a measurement only if you enumerate it.* |
+| **10** | D20 §6.2 | `Select-String -Path "$m\**\*.go"` → **false zero** on a control that must return 6 | per-file `-LiteralPath` over an enumerated 399-file list → exactly 6 | *A recursive glob in that form does not recurse the way the syntax suggests; a zero from it is a tooling artifact, not a finding.* |
+| **11** | D32 §6 | name collision across namespaces read as a `partial` split → **57** apparent splits vs a true **0** | tightened to `partial` declarations only | *Same identifier in two files is not one type in two files.* |
+| **12** | D32 §1.3 / §2 | `\|` unescaped in a `Select-String` alternation pattern → **false zero** while printing the matches | use `-SimpleMatch` for literals or escape properly | *Print the matches; a count without a printed match is a number you have not looked at.* |
+| **13** | **This report, §2.1** | `\[Authorize` requires a literal `[` **immediately** before `Authorize`; the codebase writes it **mid-line in a combined attribute list** (`[ApiController, Route(...), Authorize(Policy=...)]`) → **reported 0 on 16 of 17 controllers** | `\bAuthorize\s*\(` → **17 of 17** | *An attribute in a combined attribute list is still an attribute. Anchor on the identifier, not on the bracket.* |
+
+`[verified]` **#13 nearly became this report's headline.** A false zero on a security control reads as *"16 controllers are unguarded"* — a find far larger and more alarming than the truth. **It was caught only because the brief required printing the matches** and I printed the controller headers, where the attribute sat in the very line my regex had just called empty.
+
+`[inferred]` **The general form, and I would index this one: the failures cluster around *structural* patterns — brackets, indentation, namespace scope, glob depth — while the numbers counted are lexical.** The instrument matches tokens; the code organizes them structurally. **Every one of #7–#13 was a lexical probe against a structural question.**
+
+`[read]` **Positive controls actually run in this report:** (a) server-vs-client route-attribute control, 11 vs 0 (§0.1); (b) YAML indent-level control, 23 vs 115 (§3.1); (c) verbs cross-check, 183 client methods vs 183 route attributes, two instruments in two directions (§2.1); (d) comment-stripped method count, 183 live vs 5,571 comment/blank (§1.1). `[verified]`
+
+---
+
+## 6. Residual unknowns
+
+Each with a concrete probe, per the brief.
+
+### 6.1 Which grunt code path consumes a control tasking — the §4.4 gap
+
+**Unknown:** whether `int.TryParse(message.Message)` on the whole string (`GruntHTTP.cs:104-128`) or the `Split(',')` + base64 path runs for `SetDelay`/`SetJitter`/`SetConnectAttempts`/`SetKillDate`. §4.2's two mismatches are read facts either way; only the *consequence* (does the setting silently no-op, or does the grunt report a parse error) depends on this.
+**Probe:** trace `GruntHTTP.MessageLoop` (or equivalent) from the transport's receive point to the `message.Type` dispatch at `:104`, and determine whether an `Assembly`-framed message ever reaches the `else` branch at `InternalListener.cs:232` for a non-Assembly type. Instrument: read the full receive function, print the branch, do not infer from proximity.
+
+### 6.2 The five tasking types not built in `CovenantService.cs`
+
+**Unknown:** `Exit`, `Connect`, `Disconnect`, `Tasks`, `TaskKill` — enumerating `Type = GruntTaskingType.X` in the server found only the four in §3.2. The other five are plausibly constructed by string, by the hub, or on the grunt side.
+**Probe:** search for `GruntTaskingType.Exit` etc. as **object-initializer assignments** across the whole tree (not just `Type =` form), and separately in `Hubs/`. **Instrument warning:** a `Type =` pattern is a *shape*, and this corpus has now three times produced a false zero from a shape assumption. Use a bare-identifier search plus a printed match set.
+
+### 6.3 Whether `Parameters[0]`-as-label affects Assembly taskings too
+
+**Unknown:** §4.2 is established for the four control taskings. Whether any `Assembly` tasking has the same label-in-slot-0 shape is **not** established.
+**Probe:** for each of the 95 YAML tasks, print the `Options:` list and compare index order against what the grunt's `parameters[i-1]` loop expects. **Bounded, not sampled: all 95, all 11 files.**
+
+### 6.4 Whether the `else`-branch `:232` encoding gap is reachable at all
+
+**Unknown:** §4.3's framing disagreement is a read fact; reachability depends on §6.1.
+**Probe:** same as §6.1. **If the `else` branch is unreachable, §4.3 is dead code and should be recorded as such** — the distinction between "wrong" and "unreachable" matters and I did not resolve it.
+
+### 6.5 Not attempted, declared
+
+- **No build, no compiler, no runtime.** All `[verified]` claims are source-level with controls, not execution.
+- **`API/CovenantAPIExtensions.cs` (212,491 B) and `API/ICovenantAPI.cs` (93,517 B) were not read.** Their method counts are inferred from the client's 183-method surface, not enumerated. `[inferred]`
+- **D40 not reopened** — cross-referenced only, per the brief.
+
+

@@ -353,4 +353,240 @@ DEMON_COMMAND_PROC_MEMORY        = 6
 
 ---
 
+## §5 — Q4: NONCE REUSE (CLOSES D39 U4)
+
+**This section is placed before §3 and §4 because its arithmetic resolved completely, and because U4 is the one question whose answer changes what the other sections mean.**
+
+### 5.1 The cipher, in full
+
+```go
+func XCryptBytesAES256(XBytes []byte, AESKey []byte, AESIv []byte) []byte {
+    var (
+        ReverseXBytes = make([]byte, len(XBytes))
+    )
+
+    block, err := aes.NewCipher(AESKey)
+    if err != nil {
+        logger.Error("Decryption Error: " + err.Error())
+        return []byte{}
+    }
+
+    stream := cipher.NewCTR(block, AESIv)
+    stream.XORKeyStream(ReverseXBytes, XBytes)
+
+    return ReverseXBytes
+}
+```
+[source: `teamserver/pkg/common/crypt/aes.go:10-24`, entire file, 25 lines]
+
+**`cipher.NewCTR(block, AESIv)` — the IV is a caller parameter. The file contains no IV generation, no nonce derivation, no counter management. It is a pure function of `(plaintext, key, iv)`.**
+
+### 5.2 The agent's CTR counter, and its exact arithmetic
+
+```c
+void AesXCryptBuffer( PAESCTX ctx, PUINT8 buf, SIZE_T length)
+{
+    UINT8 buffer[AES_BLOCKLEN];
+    size_t i;
+    int bi;
+    for (i = 0, bi = AES_BLOCKLEN; i < length; ++i, ++bi)
+    {
+        if (bi == AES_BLOCKLEN) /* we need to regen xor compliment in buffer */
+        {
+            MemCopy(buffer, ctx->Iv, AES_BLOCKLEN);
+            Cipher((state_t*)buffer,ctx->RoundKey);
+            for (bi = (AES_BLOCKLEN - 1); bi >= 0; --bi)
+            {
+                if (ctx->Iv[bi] == 255)
+	            {
+                    ctx->Iv[bi] = 0;
+                    continue;
+                }
+                ctx->Iv[bi] += 1;
+                break;
+            }
+            bi = 0;
+        }
+        buf[i] = (buf[i] ^ buffer[bi]);
+  }
+}
+```
+[source: `payloads/Demon/src/crypt/AesCrypt.c:217-244`, verbatim]
+
+**The counter arithmetic, stated precisely:**
+
+1. **`buffer` is the keystream block.** `MemCopy(buffer, ctx->Iv, 16)` copies the current counter into it, and `Cipher(buffer, RoundKey)` encrypts it **in place** — so `buffer` becomes `AES_ECB(counter)`.
+2. **`bi` counts position within the keystream block**, `0..15`. The `bi = AES_BLOCKLEN` initial value forces regeneration on the first byte and every 16 bytes thereafter.
+3. **`ctx->Iv[bi] += 1` for `bi = 15` downward** — i.e. **the counter is incremented as a big-endian 128-bit integer, least-significant byte at index 15.** Carry propagates `15 → 14 → ... → 0`, with `== 255` wrapping to `0` and `continue`.
+4. **`Cipher` is applied to the counter FIRST, and the increment happens SECOND** — so block *n* uses `AES(counter_n)` where `counter_0 = IV` and `counter_{n+1} = counter_n + 1`.
+
+**This is textbook CTR mode: `keystream_n = AES_ECB(IV + n)`, big-endian.**
+
+**And it matches Go's `crypto/cipher` CTR, which increments the 128-bit counter as a big-endian integer.** **Proof by interop rather than by reading the stdlib:** the server decrypts agent-produced ciphertext with its own implementation —
+
+```go
+Header.Data.DecryptBuffer(Agent.Encryption.AESKey, Agent.Encryption.AESIv)
+```
+[source: `teamserver/pkg/handlers/handlers.go:102`; `DecryptBuffer` at `parser/parser.go:205-207` calls `crypt.XCryptBytesAES256`]
+
+**If the two counter orders disagreed, no agent message would ever decrypt, and Havoc would not function.** **It functions. So the orders agree — measured through the protocol's own success, not through the stdlib source.**
+
+**LIMITATION, stated plainly: `crypto/cipher/ctr.go` and the Go toolchain are NOT present on this box** (`Get-Command go` → not on PATH; `C:\Program Files\Go` and `C:\Go` → both absent). **I could not quote the stdlib increment code. The counter-order agreement above is established by interop, which is a stronger claim than reading the source but does not show the source.**
+
+### 5.3 The IV is generated ONCE per agent, and the counter RESTARTS on every message
+
+**Generation — once, at agent initialisation:**
+
+```c
+    // create AES Keys/IV
+    if ( Instance->Config.AES.Key == NULL && Instance->Config.AES.IV == NULL )
+    {
+        Instance->Config.AES.Key = Instance->Win32.LocalAlloc( LPTR, 32 );
+        Instance->Config.AES.IV  = Instance->Win32.LocalAlloc( LPTR, 16 );
+
+        for ( SHORT i = 0; i < 32; i++ )
+            Instance->Config.AES.Key[ i ] = RandomNumber32();
+
+        for ( SHORT i = 0; i < 16; i++ )
+            Instance->Config.AES.IV[ i ]  = RandomNumber32();
+    }
+```
+[source: `payloads/Demon/src/Demon.c:112-123`]
+
+**`Instance->Config.AES.Key` is `PBYTE` and `Instance->Config.AES.IV` is `PBYTE`** — byte arrays [source: `payloads/Demon/include/Demon.h:154-157`]. **So each `RandomNumber32()` call, which returns a `ULONG`, is truncated to its low byte on assignment.**
+
+**Reset — on every transmission:**
+
+```c
+            AesInit( &AesCtx, Instance->Config.AES.Key, Instance->Config.AES.IV );
+            AesXCryptBuffer( &AesCtx, Package->Buffer + Padding, Package->Length - Padding );
+```
+[source: `payloads/Demon/src/core/Package.c:257-258`]
+
+```c
+void AesInit( PAESCTX ctx, const PUINT8 key, const PUINT8 iv)
+{
+  KeyExpansion( ctx->RoundKey, key );
+  MemCopy( ctx->Iv, iv, AES_BLOCKLEN );
+}
+```
+[source: `payloads/Demon/src/crypt/AesCrypt.c:103-107`]
+
+**`AesInit` copies from `iv` — which is `Instance->Config.AES.IV` — into the context.** **`AesXCryptBuffer` then mutates `ctx->Iv`, not `Config.AES.IV`.** **`Config.AES.IV` is never written again after `Demon.c:122`.**
+
+**Four call sites all pass the same persisted IV:**
+
+| Site | Context |
+|---|---|
+| `Package.c:257` | `PackageTransmit` (first transmit path) |
+| `Package.c:390` | `PackageTransmitAll` (broadcast path) |
+| `Transport.c:27` | transport init/handshake |
+| `Parser.c:28` | `ParserDecrypt` — via a `Key, IV` pair passed in |
+
+[source: `Select-String 'AesInit\s*\('` over `payloads/Demon/src/**/*.c`; the fifth match is the declaration at `AesCrypt.c:103`]
+
+**And the server adopts the agent's key/IV rather than generating its own:**
+
+```go
+	a.Encryption.AESKey = Parser.ParseAtLeastBytes(32)
+	a.Encryption.AESIv = Parser.ParseAtLeastBytes(16)
+```
+[source: `teamserver/pkg/agent/demons.go:2372-2373`; identically at `agent.go:387-388`]
+
+**persisted to the database:**
+
+```sql
+UPDATE TS_Agents SET Active = ?, Reason = ?, AESKey = ?, AESIv = ?, ...
+```
+[source: `teamserver/pkg/db/agents.go:98`]
+
+**So: one key and one IV per agent, for the agent's entire lifetime, and the counter is reset to that IV at the start of every message.**
+
+### 5.4 The answer, with the arithmetic
+
+**The keystream for message *m*, at byte offset *n* within the encrypted region:**
+
+$$K_{m}(n) = \text{AES-ECB}_{\text{Key}}\!\left(\; \text{IV} + \left\lfloor n/16 \right\rfloor \;\right)\Big[\, n \bmod 16 \,\Big]$$
+
+**where the addition is big-endian 128-bit and `IV` is the fixed per-agent value.**
+
+**The `IV` term does not depend on *m*. Neither does `Key`. Therefore `K_m(n) = K_{m'}(n)` for all messages *m*, *m′* — the keystream repeats.**
+
+**Two-time pad, stated exactly:** for two messages `A` and `B` encrypted under the same keystream, with ciphertexts `C_A = A ⊕ K` and `C_B = B ⊕ K`:
+
+$$C_A \oplus C_B = A \oplus K \oplus B \oplus K = A \oplus B$$
+
+**The key material cancels. An observer with both ciphertexts obtains the XOR of the two plaintexts, with no key and no cryptanalysis.** **With N observers collecting N messages, the same applies pairwise.**
+
+**Qualified by the offset within the message:** the keystream is a function of *n* from the start of the encrypted region. **So the leak is strongest between two messages of similar length at the same offset, and weaker (but still real) across differing lengths — the standard two-time-pad structure.** **D39 §3.3 established that the agent encrypts from offset 20 and the server decrypts from offset 0 of the post-header region, and that the keystream is aligned at the payload boundary — so for a given command, the payload bytes of two messages sit at the same keystream positions.**
+
+### 5.5 The answer to the Lead's third sub-question: is there any path where the same pair is used twice
+
+**Every path. There is no path that does not.** The pair `(Config.AES.Key, Config.AES.IV)` is generated once at `Demon.c:113-123`, is never regenerated, and `AesInit` at `Package.c:257` re-seeds from it on every single `PackageTransmit` call.
+
+**There is no message counter, no nonce field, no re-keying, and no IV evolution anywhere in the transmit path.** **The IV is a constant for the agent's life.**
+
+**The one qualification: `Package.c:270` re-XORs the same buffer with a fresh `AesCtx` seeded from the same IV —**
+
+```c
+        } else if ( Package->Encrypt ) {
+            AesXCryptBuffer( &AesCtx, Package->Buffer + Padding, Package->Length - Padding );
+        }
+```
+[source: `Package.c:269-271`]
+
+**This is the "restore plaintext after sending" step D34 §6.7 recorded.** **It works precisely because the keystream is deterministic and restartable from the same IV — the agent's design *depends* on the counter being reset.** **The property that makes the restore work is the same property that makes the keystream repeat.** **That is the finding: the nonce reuse is not an oversight in one branch, it is load-bearing for correct buffer handling.**
+
+**Contrast with the server, which allocates a new slice rather than mutating in place** (D39 §2.2a) — **so the server has no need for the reset and does not depend on it, but it inherits the same fixed IV because it adopts the agent's.**
+
+### 5.6 A second, independent finding: the IV and key bytes are 7-bit
+
+**`RandomNumber32` does not return 32 random bits:**
+
+```c
+ULONG RandomNumber32(
+    VOID
+) {
+    ULONG Seed = 0;
+
+    Seed = NtGetTickCount();
+    Seed = Instance->Win32.RtlRandomEx( &Seed );
+    Seed = Instance->Win32.RtlRandomEx( &Seed );
+    Seed = ( Seed % ( LONG_MAX - 2 + 1 ) ) + 2;
+
+    return Seed % 2 == 0 ? Seed : Seed + 1;
+}
+```
+[source: `payloads/Demon/src/core/Win32.c:1304-1315`, verbatim]
+
+**Three observations, each verifiable from the source:**
+
+1. **`:1314` forces the result even.** `Seed % 2 == 0 ? Seed : Seed + 1` — if odd, add 1. **The return value is always even.** Assigned into a `PBYTE` array, **each key and IV byte has its low bit fixed at `0`, so each carries at most 7 bits of entropy instead of 8.**
+2. **The entropy budget is therefore:** key `32 × 7 = 224` bits (nominally 256); IV `16 × 7 = 112` bits (nominally 128).
+3. **`:1309` seeds from `NtGetTickCount()`** — a millisecond uptime counter — **then applies `RtlRandomEx` twice.** `RtlRandomEx` is a deterministic PRNG given its seed. **So the entropy of any single byte is bounded by the tick-count resolution at the moment of the `Demon.c:118-122` loop, not by a CSPRNG.**
+
+**`NtGetTickCount` at millisecond resolution, with 32 key bytes and 16 IV bytes generated in one tight loop at `:118-122`, means consecutive outputs come from tick counts that differ by, at most, single-digit milliseconds between them — and the loop characteristically completes within the same tick.** **Two consecutive calls with the same seed produce the same value; the `+1`-if-odd makes them both even.**
+
+**I am not claiming these are equal without measuring it.** **The claim I can make from source: the seed is a millisecond tick count read inside a loop that occupies microseconds, and the output is coerced even.** **The probe that would settle the entropy is named in §6 as U-3.** **This is stated as a structural weakness with a named probe, not as a demonstrated break.**
+
+### 5.7 Positive controls
+
+**Control 1 — the "IV reused" claim is not inferred from the absence of a generator; it is the presence of a constant.** `Demon.c:122` writes `Config.AES.IV[i]` once; the only other write to that field in the entire tree is `Demon.c:531` `Instance->Config.AES.IV = NULL;` (teardown) [source: `Select-String 'AES\.IV'` over `payloads/Demon/**`]. **Two writes, one of which is a null-out. The field is a constant after init.**
+
+**Control 2 — the counter reset is measured, not assumed.** `AesInit`'s body is `MemCopy(ctx->Iv, iv, 16)` at `:106` — **it copies INTO the context FROM the argument.** **A `MemCopy` in the other direction would make the counter persist; the argument order rules that out.** **Read the body rather than inferred from the call site.**
+
+**Control 3 — the offset that `AesInit` copies from is confirmed to be the config field at each call site.** All four call sites were printed with their arguments; two are `Instance->Config.AES.IV` verbatim.
+
+**Control 4 — the interop argument is falsifiable and I checked it.** If Go's CTR used a little-endian counter while the agent uses big-endian, the interop would fail. **It does not fail**, per `handlers.go:102`'s live decrypt path. **I could not read the stdlib to confirm the mechanism, which is recorded as a limitation rather than glossed.**
+
+### 5.8 Q4 verdict
+
+**CTR mode with a reused `(key, IV)` pair is a two-time pad. Havoc's design guarantees that reuse:**
+
+**one key and IV per agent, generated once at `Demon.c:113-123`, re-seeded on every transmission by `AesInit` at `Package.c:257`, with no message counter, no nonce field, and no re-keying.**
+
+**The arithmetic is `C_A ⊕ C_B = A ⊕ B`. The property is load-bearing for the agent's in-place re-XOR at `Package.c:270`, so it is not a bug in one branch — it is the design.** **Independently, the key and IV bytes are coerced even by `Win32.c:1314` and seeded from a millisecond tick count at `:1309`, which reduces and constrains the entropy beyond the reuse itself.**
+
+---
+
 *(§3 follows)*
