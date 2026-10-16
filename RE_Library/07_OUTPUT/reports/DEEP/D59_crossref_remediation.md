@@ -50,6 +50,8 @@ MISSING from 1..64: 27, 45, 58, 59, 60, 61
 ```
 `[verified]` **58 distinct D-numbers among `D*-named files`, 61 once multi-file numbers are unioned** (§1.2). A missing number is **not** a dangling reference — no report cites `D45 §x`. But it matters for Q4: **a gap means a number could be reused, and #13 already names two different failures.**
 
+> **`[verified]` SUPERSEDING NOTE, added after this section was written — the gap list above is already stale, and that is the point.** At the **final** reading (§6) the tree carries **D1–D26, D28–D67** — `D45` **exists** (`D45_metasploit_scanner_and_post_exploitation.md`, 29,661 B; §8 F9), and **`D58`, `D60`, `D62`–`D67` have all been created since.** The genuine gaps are now **`D27`, `D59`** *(this file — the gap was this report not existing yet)*, and **`D61`**. `[inference]` **This paragraph is a correction of a correction, inside the same document, within one working session.** It is left visible rather than folded in, because **it is the strongest available evidence for §6's claim that this corpus cannot be audited as a fixed object** — and because deleting it would recreate, in this report, the exact defect this report documents: *a figure carried forward past the revision that made it true.*
+
 **`[verified]` Correction 3 — the predecessor's own §7 found "no drift," and that finding does not survive the population change.**
 
 `[verified]` `CROSSREF_AUDIT.md:190` — *"No document silently restates another's number without attribution. That is why class-2 drift is absent, and it is a stated practice, not luck."* `[verified]` **That was true of 15 reports.** It is **not** a claim about 77, and D61 (numeric claim audit) re-opens it. **I record the predecessor's finding as correct-for-its-population and do not repeat it forward.**
@@ -396,3 +398,99 @@ D54 4 | D40 4 | D3 4 | STATUS 4 | D60 4 | D48 3    ... 15 further sources at 1-2
 ### 5.4 The complete table
 
 `[inference]` **106 rows.** The five highest-value entries and the three cluster repairs are given in full above; the remainder are enumerated mechanically by the §0.2 invocation, whose `$sm | Sort-Object File,Line` output **is** the table. `[inference]` **I state this explicitly rather than padding the document**: re-running §0.2 reproduces every row with its file, line, target, and reason, and **a table transcribed by hand from that output carries a transcription risk this report has already demonstrated once** (§1.3 footnote). **The invocation is the table.**
+
+---
+
+## §6 The corpus moved during this audit
+
+`[inference]` **The predecessor's §6 recorded this and it happened again, harder.** Five separate population readings were taken while this audit was running:
+
+| reading | documents | D-numbers | trigger |
+|---|---|---|---|
+| 1st | 75 | 58 | initial enumeration |
+| 2nd | 76 | 60 | `D60_covenant_transport_divergence.md` appeared |
+| 3rd | 77 | 61 | one further document |
+| 4th | **79** | **63** | `D62`, `D63` appeared |
+| **final** | **77** | **63** | after the §1.1 exclusions are applied |
+
+`[inference]` **Two consequences, both material.**
+
+### 6.1 A count is a snapshot, and this one says so
+
+`[inference]` **3,941 edges is the count for the corpus as it stood at the final reading.** It is not a property of the corpus. `[verified]` Every headline figure in this report is anchored to the population **77 documents / 63 D-numbers**, stated here so a later reader can tell whether a disagreement is a defect or a different revision.
+
+### 6.2 Document identity is not file identity — and the collision has now doubled
+
+`[verified]` **The predecessor knew about `D11` and called it "the highest-risk latent defect."** It is now worse:
+
+```
+D11 -> 5 files   D11_havoc_native_win32.md, D11_merlin_binaries.md,
+                 D11_mythic_crypto_postresponse.md, D11_pupy_transport_crypto.md,
+                 D11_sliver_rpc_core.md
+D12 -> 2 files   D12_havoc_dispatch.md, D12_sliver_aitools.md
+```
+
+`[inference]` **`D12` is a NEW conflation the predecessor's §6 did not know about.** `[verified]` And it is **live in this audit's data**, not theoretical: `D15:536` cites `D12 §6.2` and `D6`'s neighbour cites `D12` — **a `D<n>`-keyed resolver must union `D12`'s two files and will then report `§6.2` as OK if *either* file has it, even when the author meant the other one.**
+
+`[inference]` **This audit inherited exactly that defect and I am naming it rather than hiding it:**
+
+```
+[verified] $byNum['12'].files.Count  ->  2
+[verified] $byNum['11'].files.Count  ->  5
+```
+
+`[inference]` **My resolver unions multi-file D-numbers, so every `D11`/`D12` verdict in §1.3 is an *optimistic* verdict** — it passes if the section exists in **any** file of that number. `[inference]` **A per-file resolver would report strictly more failures.** The direction of the error is stated so it can be corrected: **106 is a lower bound.**
+
+### 6.3 Ambiguous document numbers, never to be cited bare
+
+`[inference]` Per the corpus's own standing rule, these must always carry a suffix:
+
+| number | files | cite as |
+|---|---|---|
+| `D11` | 5 | `D11_mythic`, `D11_pupy`, `D11_sliver`, `D11_havoc`, `D11_merlin` |
+| `D12` | 2 | `D12_havoc_dispatch`, `D12_sliver_aitools` |
+
+`[inference]` **`#13` is the corpus's precedent for what happens when this is ignored** — it names two *different* failures, and D55 §0.3 records it as `[AMBIGUOUS]`. `D12` is now the second such number.
+
+---
+
+## §7 Residual unknowns
+
+| ID | Unknown | Severity | Why it is unresolved |
+|---|---|---|---|
+| **R-59.1** | **106 is a lower bound.** A per-file resolver for `D11`/`D12` would find more failures. | **high** | §6.2. The union-resolver is what the predecessor used and I kept it for comparability. **Correcting it changes the count and I did not want two variables moving at once.** |
+| **R-59.2** | **Are the T-series, `STATUS.md` and `CROSSREF_AUDIT.md` in population?** | **medium** | §1.1. I **included** them (they cite and are cited) and **excluded** `CROSSREF_AUDIT.md` from *being* cited as a target (§0.4). `[verified]` `STATUS.md` itself carries **4 failures** — so the choice is not cosmetic. |
+| **R-59.3** | **The two most reference-dense documents are excluded from their own audit.** | **medium** | §0.4. A reference inside a quoted example is not a pointer — **that is an argument, not a measurement.** |
+| **R-59.4** | **The predecessor's §8 natural-language citation class is still unmeasured.** | **medium** | `[verified]` Its own probe saw 8 refs via verb patterns and missed bare `(D5)` parentheticals — *"wrong by 3×."* `[inference]` **My rule R has the same blind spot by construction**: a parenthetical `(D5)` with no section sign is not an edge. |
+| **R-59.5** | **Whether every `SUB-MISSING` is a defect or a deliberate forward reference.** | **medium** | `[inference]` Some refs may point at sections **planned** in a later round — D14's §9.1 ledger reads like exactly that. **An audit cannot distinguish "never written" from "not yet written."** |
+| **R-59.6** | **The `§0`-as-bold-paragraph convention is now assumed, not confirmed.** | **low** | §2.2. I treated `**§0.1 — ...**` as a heading because D48/D55/D32 use it that way. `[verified]` If any document uses `**§N.M**` as *prose emphasis*, I have silently converted a failure into a pass. |
+
+---
+
+## §8 Instrument failures in this audit
+
+`[inference]` **Nine corrections, each caught by a control rather than by reading. This section exists because a remediation report whose own instrument is unaudited is the defect it was written to find.**
+
+| # | Failure | How it was caught | Effect if shipped |
+|---|---|---|---|
+| **F1** | **`'§\u00A7'` in a single-quoted PowerShell string is not an escape.** The class became `[§ \ u 0 0 A 7]` — matching `0`, `7`, `A`, `u`. | **Negative control** — `/beta-1.0/` and `rex-socket-0.1.71` matched. | **Edge count inflated to 8,355 (2.1×).** Phantom `§1.0` and `§0.1.71` references. |
+| **F2** | **Single-regex doc-prefix capture fails after a preceding match on the same line.** `Regex.Matches` resumes past the first match, so `D29 §5 / D38 §8.6` lost the `D38`. | Printed both matches and read the group values. | **2 false SUB-MISSING** on `D55:57`; systematic across every multi-ref line. |
+| **F3** | **Heading index read only `#`-prefixed lines.** | `D14 §9.1` was reported missing while D14's ledger cites it 12×. | **~20 false failures**; hid the real self-section cluster. |
+| **F4** | **Believed `IOC_pupy.md` had mojibake.** Display showed `# D6 â€” Pupy IOC`. | **Read the bytes**: `23 20 44 36 20 E2 80 94 20` = valid UTF-8 em-dash. | **A fabricated byte defect.** Stopped before publication. |
+| **F5** | **`-Filter` with an array.** `Cannot convert 'System.Object[]' to 'System.String'`. | Live error. | Enumeration would have silently covered a subset. |
+| **F6** | **First depth breakdown said "DEEP 64 / other 1."** Arithmetically right, semantically wrong — the "other" was inside DEEP at depth 4. | Cross-checked against the `DEEP` listing's own count of 65. | **Mode C in a new place** — a prefix test conflating a subtree with a file set. |
+| **F7** | **Wrote "36-document corpus" in the §1.3 header** against a measured 77. | Re-read. | Kept in place as a footnote (§1.3), **not silently corrected.** |
+| **F8** | **First extraction counted each regex hit, not each edge** — `CROSSREF_AUDIT.md:27` yielded `D6 §25.6` twice. | Sample print showed the duplicate. | **178 phantom edges.** Fixed by a `(file,line,target)` key. |
+| **F9** | **Assumed `D45` did not exist** from a stale glob, then found `D45_metasploit_scanner_and_post_exploitation.md` (29,661 B). | Re-enumerated with `Get-ChildItem -Recurse`. | Would have mis-stated the gap list in §0.1 Correction 2. |
+
+`[inference]` **The pattern across all nine: every one was caught by a control or a print, and none by inspection.** `[verified]` F1 alone would have **doubled** the reported failure count in the direction of alarm; F3 would have **tripled** it. `[inference]` **Both errors were plausible-looking output** — which is why the predecessor's C-2 (*print your matches*) and C-3 (*build the positive control before the classification*) are load-bearing rather than ceremonial.
+
+---
+
+## §9 Three-line summary
+
+`[inference]` **The corpus has 106 broken section references across 77 documents, and the recorded figure of 16 was never wrong — it was measured over 15 documents and carried forward without its population.**
+
+`[inference]` **The failures are a scatter, not a cluster:** 33 targets and 27 sources for 106 refs, with one real cluster — three documents (**D14, D23, D55**) that wrote closure ledgers against their own sub-sections and never created them, accounting for **37%** of all failures in **three edits**.
+
+`[inference]` **All six of the predecessor's dangles are still live, none was ever repaired, and all four genuine ones are the same Mode A prefix-drop** — the defect the corpus diagnosed, documented, and then kept committing, including in the document that diagnosed it.
