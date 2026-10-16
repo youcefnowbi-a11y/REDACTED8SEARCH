@@ -589,4 +589,274 @@ ULONG RandomNumber32(
 
 ---
 
-*(§3 follows)*
+## §3 — Q3a: THE SMB 8-BYTE READ HEADER (CLOSES D39 U2)
+
+### 3.1 The instrument
+
+**D34 recorded that `SmbRecv` validates its own 8-byte `[DemonId][PackageSize]` header against `PackageCreateWithMetaData`'s 20-byte header, and left it as a suspected misread. D39 §3 established the HTTP path's 8-byte disagreement is absorbed because `Command` and `RequestID` are parsed *before* the decrypt and never re-read. The question is whether SMB has the same absorber.**
+
+**Three files had to be read together: the reader, the writer, and the function that locates the ID.**
+
+### 3.2 The reader — `SmbRecv`
+
+```c
+BOOL SmbRecv( PBUFFER Resp )
+{
+    DWORD BytesSize   = 0;
+    DWORD DemonId     = 0;
+    DWORD PackageSize = 0;
+
+    if ( Instance->Win32.PeekNamedPipe( Instance->Config.Transport.Handle, NULL, 0, NULL, &BytesSize, NULL ) )
+    {
+        if ( BytesSize > sizeof( UINT32 ) + sizeof( UINT32 ) )
+        {
+            if ( ! Instance->Win32.ReadFile( Instance->Config.Transport.Handle, &DemonId, sizeof( UINT32 ), &BytesSize, NULL ) && NtGetLastError() != ERROR_MORE_DATA )
+            ...
+            if ( Instance->Session.AgentID != DemonId )
+            {
+                PRINTF( "The message doesn't have the correct DemonId: %x\n", DemonId )
+                ...
+```
+[source: `payloads/Demon/src/core/TransportSmb.c:65-92`]
+
+**Read 1 → `DemonId` (4 B), compared against `Instance->Session.AgentID` at `:84`. Read 2 → `PackageSize` (4 B), used at `:102` to allocate exactly that many bytes. Then `PipeRead` consumes the remainder.**
+
+### 3.3 The writer — and the first thing that rules out a five-field parse
+
+```c
+BOOL PipeWrite(
+    IN  HANDLE   Handle,
+    OUT PBUFFER Buffer
+) {
+    DWORD Written = 0;
+    DWORD Total   = 0;
+
+    do {
+        if ( ! Instance->Win32.WriteFile( Handle, Buffer->Buffer + Total, MIN( ( Buffer->Length - Total ), PIPE_BUFFER_MAX ), &Written , NULL ) ) {
+            return FALSE;
+        }
+
+        Total += Written;
+    } while ( Total < Buffer->Length );
+
+    return TRUE;
+}
+```
+[source: `payloads/Demon/src/core/Win32.c:1202-1218`, verbatim]
+
+**`PipeWrite` writes `Buffer->Buffer` verbatim from offset 0. It prepends nothing.** **And `SmbSend` passes the package straight to it —**
+
+```c
+    if ( ! PipeWrite( Instance->Config.Transport.Handle, Send ) )
+```
+[source: `payloads/Demon/src/core/TransportSmb.c:44`; the same call at `:41` on the connect path]
+
+**So there is no separate 8-byte SMB envelope. The 8 bytes `SmbRecv` reads ARE the first 8 bytes of the package buffer itself.**
+
+### 3.4 The package header, and the field the reader actually reads
+
+```c
+PPACKAGE PackageCreateWithMetaData( UINT32 CommandID )
+{
+    PPACKAGE Package = PackageCreate( CommandID );
+
+    PackageAddInt32( Package, 0 ); // package length
+    PackageAddInt32( Package, DEMON_MAGIC_VALUE );
+    PackageAddInt32( Package, Instance->Session.AgentID );
+    PackageAddInt32( Package, Package->CommandID );
+    PackageAddInt32( Package, Package->RequestID );
+
+    return Package;
+}
+```
+[source: `payloads/Demon/src/core/Package.c:174-185`, verbatim]
+
+**Header, offset by offset, confirmed against the comment at `Package.c:379-386` and the `Padding` expression at `:387`:**
+
+| Offset | Field | Written by |
+|---|---|---|
+| `[0..3]` | **package length** | `PackageAddInt32(Package, 0)` `:178`, filled in later by `Int32ToBuffer( Package->Buffer, Package->Length - sizeof(UINT32) )` `:377` |
+| `[4..7]` | `DEMON_MAGIC_VALUE` | `:179` |
+| `[8..11]` | **`Instance->Session.AgentID`** | `:180` |
+| `[12..15]` | `Package->CommandID` | `:181` |
+| `[16..19]` | `Package->RequestID` | `:182` |
+
+**Now the correspondence, stated exactly:**
+
+| `SmbRecv` reads | Offset | Header field at that offset | Name the code gives it |
+|---|---|---|---|
+| read 1 → `DemonId`, compared to `Session.AgentID` | `[0..3]` | **package length** | *not* the AgentID |
+| read 2 → `PackageSize`, allocates that many | `[4..7]` | **`DEMON_MAGIC_VALUE`** | *not* the size |
+| — | `[8..11]` | the actual **AgentID** | never read here |
+| — | `[12..19]` | CommandID, RequestID | never read here |
+
+**The reader's two field names are exchanged with respect to the writer's two fields at those offsets.** **`DemonId` is compared against `Session.AgentID`, but offset `[0..3]` holds the package length.** **`PackageSize` is used as an allocation size, but offset `[4..7]` holds the magic value.**
+
+### 3.5 The second reader — `PivotParseDemonID`, and it agrees with the WRITER
+
+**This is the cross-check that decides the question, and the Lead's rule applies: two instruments disagree, so measure the source.**
+
+```c
+UINT32 PivotParseDemonID( PVOID Response, SIZE_T Size )
+{
+    PARSER Parser  = { 0 };
+    UINT32 Value   = 0;
+
+    ParserNew( &Parser, Response, Size );
+
+    ParserGetInt32( &Parser );
+    ParserGetInt32( &Parser );
+
+    Value = __builtin_bswap32( ParserGetInt32( &Parser ) );
+    ...
+```
+[source: `payloads/Demon/src/core/Pivot.c:331-341`, verbatim]
+
+**Two `ParserGetInt32` calls discard offsets `[0..3]` and `[4..7]`, and the THIRD read — offsets `[8..11]` — is the value it returns as the DemonID.**
+
+**And `[8..11]` is where `PackageCreateWithMetaData:180` writes `Instance->Session.AgentID`.**
+
+**So `PivotParseDemonID`, the function whose entire purpose is to find an agent ID in an SMB pivot buffer, reads it from offset 8. `SmbRecv`, the other reader of the same format, reads it from offset 0.**
+
+### 3.6 What this means — and what it does not
+
+**`PivotParseDemonID` is correct against the writer. `SmbRecv` is not.** **The same header is parsed by two functions in the same transport family, and only one of them agrees with the code that builds it.**
+
+**The consequence, traced concretely:** `SmbRecv:84` compares offset `[0..3]` — the package **length** — against `Session.AgentID`. **A `DWORD` length equals a `DWORD` AgentID only by collision.** **When they differ, `:84` fires, and `:80-89` sets `Session.Connected = FALSE` and returns FALSE.** **That is a disconnect on a length/ID mismatch, not a data corruption — the message is discarded rather than mis-parsed, because the guard fires before `PipeRead` and before any allocation using the mis-named `PackageSize`.**
+
+**So the failure mode is a false disconnect, not a buffer overrun.** **`Resp->Buffer` is still `NULL` at that point** (`:78`), so the mis-sized allocation at `:102` is never reached on this path.
+
+**But note what the guard is: `Session.AgentID` is set from the pivot handshake, and the length field varies per message. So any SMB pivot message whose length does not equal the agent ID will be rejected at `:84`** — meaning the check passes only when length == AgentID, which is to say when the two numbers happen to coincide.
+
+**LIMITATION, stated: I have not run this code, so I cannot demonstrate a specific message that triggers it. The claim is structural — the offset the reader uses is not the offset the writer writes — and it is established by reading three functions that agree on the layout, with the fourth disagreeing. The probe that would convert this to a demonstration is named in §6 as U-5.**
+
+### 3.7 Does SMB have the HTTP absorber? No — and that is the answer to the Lead's question
+
+**The HTTP path's absorber was: header fields are parsed from the plaintext before the region is decrypted, and nothing re-reads them afterward, so an 8-byte span difference in the encrypted region never lands on a field that is subsequently trusted.** [source: D39 §3.3; `handlers.go:78-80` before `:99-103`]
+
+**The SMB path has no such absorber, because there is no decrypt on this path at all.** **`SmbRecv` reads 8 bytes, does an ID comparison, reads `PackageSize` more bytes, and hands the buffer to `Command.c:90` via `SMBGetJob` — where the parse loop at `Command.c:96-125` takes over and decrypts the *three-field* task region itself, exactly as it does for HTTP.**
+
+**The SMB 8-byte read is transport framing, not header parsing, and it duplicates the first 8 bytes of the payload header rather than extending it.** **That duplication is where the two functions disagree.**
+
+### 3.8 Q3a verdict
+
+**Bug, not accounted-for.** **`SmbRecv` reads the agent ID from offset 0 where the writer places the package length, while `PivotParseDemonID` — the other reader of the same format — correctly reads it from offset 8.** **The HTTP path's absorber does not exist on this path because the SMB path performs no decrypt here.** **The observable effect is a false-disconnect guard, not a mis-parse, because the comparison at `:84` fires before the buffer is used.**
+
+---
+
+## §4 — Q3b: `Packer.Build()` AND THE WIRE (CLOSES D39 U3)
+
+### 4.1 The function
+
+```go
+func (p *Packer) Build() []byte {
+	T := make([]byte, 20)
+	Temp := make([]byte, len(T))
+
+	// check if aes key is empty if so then its not enabled
+	if bytes.Compare(p.AesKey, Temp) == 0 {
+		return p.data
+	}
+
+	if p.AesKey == nil {
+		logger.Debug("No Aes Key specified")
+	}
+
+	if (p.AesKey != nil) || (p.AesIV != nil) {
+		p.data = crypt.XCryptBytesAES256(p.data, p.AesKey, p.AesIV)
+	}
+
+	return p.data
+}
+```
+[source: `teamserver/pkg/common/packer/packer.go:80-93`]
+
+**`Build()` encrypts `p.data` from offset 0 — the whole buffer, no 20-byte skip.** **That is the asymmetry against the agent's `Package.c:258`, which encrypts `Package->Buffer + Padding` with `Padding = 20`.** [source: `Package.c:250-258`]
+
+**The question is which call sites reach the wire.**
+
+### 4.2 The four call sites, measured
+
+```
+Get-ChildItem $h\teamserver -Recurse -File -Filter *.go | Select-String -Pattern '\.Build\(\)'
+   → dispatch.go:915    if PayloadBuilder.Build() {
+   → builder.go:408     if DllPayload.Build() {
+   → handlers.go:88     Build = Packer.Build()
+   → handlers.go:287    Build = Packer.Build()
+```
+[source: the command above; 4 sites]
+
+| Site | Function | What it builds | Reaches an agent? |
+|---|---|---|---|
+| `dispatch.go:915` | `DispatchEvent`, GUI client path | operator-requested payload bytes for download | **No — client-bound** |
+| `builder.go:408` | `DllPayload.Build()` | the compiled agent DLL **before** it is a running agent | **No — build-time artifact** |
+| `handlers.go:88` | `handleDemonAgent`, `DEMON_INIT` reconnect | reconnect acknowledgement | **Yes** |
+| `handlers.go:287` | `handleDemonAgent`, `COMMAND_MEM_FILE` | mem-file chunk fetch | **Yes** |
+
+### 4.3 CORRECTION, MADE AGAINST MYSELF BEFORE ANY CONCLUSION — BOTH WIRE SITES USE THE SESSION KEY
+
+**In the first draft of this section I wrote that `handlers.go:85` constructs `packer.NewPacker(nil, nil)` and that the `DEMON_INIT` ack therefore goes out unencrypted. I then read the line instead of restating it. Both statements are wrong.**
+
+```go
+			/* check if this is a 'reconnect' request */
+			if Command == agent.DEMON_INIT {
+				logger.Debug(fmt.Sprintf("Agent: %x, Command: DEMON_INIT", Header.AgentID))
+				Packer = packer.NewPacker(Agent.Encryption.AESKey, Agent.Encryption.AESIv)
+				Packer.AddUInt32(uint32(Header.AgentID))
+
+				Build = Packer.Build()
+
+				_, err = Response.Write(Build)
+```
+[source: `teamserver/pkg/handlers/handlers.go:82-90`, verbatim]
+
+**`NewPacker(Agent.Encryption.AESKey, Agent.Encryption.AESIv)` — the real session key and IV, taken from the `Agent` record.** **The reconnect ack is encrypted.**
+
+```go
+			Packer = packer.NewPacker(Agent.Encryption.AESKey, Agent.Encryption.AESIv)
+			Packer.AddUInt32(uint32(Header.AgentID))
+
+			Build = Packer.Build()
+
+			_, err = Response.Write(Build)
+```
+[source: `teamserver/pkg/handlers/handlers.go:284-289`, verbatim]
+
+**`handlers.go:287` is the same shape: real session key and IV.** **The mem-file chunk is encrypted.**
+
+**What I had wrong:** I carried a note that `handlers.go:85` was a `nil, nil` packer. **The `nil, nil` packer exists in the codebase — but it is in the service-agent path, not this handler**, and I had not measured which site owned which. **The instrument that fixes it is reading the four lines between `:83` and `:88`, which I had not done when I drafted the claim.** **This is the fifth self-caught error in this lane and the second in D47; it is recorded rather than silently fixed, per corpus practice.**
+
+### 4.4 What the `Packer.Build()` offset difference actually means, now that both sites are measured
+
+**Both wire-reaching sites encrypt from offset 0, over a buffer that begins with `Packer.AddUInt32(uint32(Header.AgentID))`.** **So the server's wire format for these two replies is `[AgentID : 4 B][ encrypted-from-offset-0 payload ]`.**
+
+**The agent's inbound parse of a package is `[SIZE][MAGIC][AGENTID][COMMANDID][REQUESTID]` then decrypt from offset 20** [source: `Package.c:379-391`].
+
+**These are two different formats.** **The agent does not parse the `DEMON_INIT` ack or a mem-file chunk with the same header discipline it applies to a task package — and it does not need to, because both are read on paths that expect a payload, not a framed package.** **That is a design statement about the two directions, not a defect: `Packer.Build()` is the server's reply-serialiser for payload bytes, and `PackageCreateWithMetaData` is the agent's message-serialiser for framed packages. They are not supposed to agree.**
+
+**So the answer to D39 U3 is: `Packer.Build()`'s whole-buffer encryption DOES reach agent traffic at two sites, both encrypted with the session key, and the offset-0 choice is correct for the payload-shaped replies those sites produce.** **No asymmetric-encryption defect.** **And D34's transport finding is untouched — different packer, different direction, different format.**
+
+### 4.5 SOURCE GAP — MY EARLIER CLAIM ABOUT `service/service.go` IS NOT IN THIS REPORT
+
+**The `nil, nil` packer I misattributed above is a real construct elsewhere in the tree.** **In D39 §2.4 I recorded a `NewPacker` at `service/service.go` among five `NewPacker` calls.** **The measured `NewPacker` call sites are `agent.go:749`, `agent.go:790`, `builder.go:563`, `handlers.go:85`, `handlers.go:284`** [source: the `NewPacker` census in D39 §7.3, which corrected a "5 call sites" claim to "target 1 / control 6 / control 4" hits].
+
+**So `service/service.go` is NOT among the five.** **That path is the service-agent RPC, and its packer construction is unmeasured here.** **Named as U-6 in §6.**
+
+### 4.6 The `bytes.Compare` detail, kept because it is correct and is the reason the guard is worth noting
+
+**`Build()`'s early return tests `bytes.Compare(p.AesKey, Temp) == 0` against a 20-byte zero slice `Temp`** [source: `packer.go:81-85`].
+
+- **If `p.AesKey` is a 32-byte session key, `Compare` returns non-zero and the early return does not fire.**
+- **If `p.AesKey` were `nil`, `bytes.Compare(nil, Temp)` compares an empty slice to a 20-byte slice and returns `-1` — also non-zero — so the early return STILL does not fire.**
+- **Then `:88` `if (p.AesKey != nil) || (p.AesIV != nil)` decides.** **With `nil, nil` both are false and no encryption happens; with a real key the `||` is true and encryption happens.**
+- **The `if p.AesKey == nil { logger.Debug(...) }` at `:87` is therefore the ONLY diagnostic for the unencrypted-reply case, and it emits only under `--debug`** (`logger/global.go:21`, `cmd/server.go:57-60`) [source: D39 §4.3].
+
+**So the guard structure has a real gap — an unencrypted server reply is silent in a default deployment — but on THIS path the gap is not reached, because both call sites pass a real key.** **It would be reached if any `NewPacker(nil, nil)` site wrote its `Build()` to a socket. That is what U-6 checks.**
+
+### 4.7 Q3b verdict
+
+**Two of four `Packer.Build()` sites reach an agent: `handlers.go:88` and `handlers.go:287`, and both are encrypted with the session key — measured, at `:85` and `:284` respectively.** **The whole-buffer offset-0 encryption is correct for the payload-shaped replies these sites build and does not conflict with the agent's 20-byte header, because the two serialisers serve different directions.** **D34's transport finding is not inverted.** **The unencrypted-reply hazard is real in the guard structure but is not demonstrated on these two paths, and is carried as U-6 for the `nil, nil` packer's own write site.**
+
+---
+
+*(§6 follows)*
