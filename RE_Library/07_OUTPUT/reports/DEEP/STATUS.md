@@ -3,6 +3,221 @@
 Function-by-function reversal of every target in the corpus. Written incrementally; this file is
 the board, the report files are the deliverables.
 
+## Round 19 — the repository, and three lanes' worth of corrections
+
+**Ledger re-measured file by file this round: 40 deliverables, 2,878,226 B** (excluding `STATUS.md`
+itself and `CROSSREF_AUDIT.md`). Round 18's file set is intact; **D38 (55,943 B), D39 (55,209 B),
+D40 (34,079 B), D43 (30,980 B)** all confirmed on disk by size.
+
+### The push target was restricted by GitHub
+
+`REDDACTED8SEARCH` returned **`Repository not found` on 12 consecutive probes** with real process exit
+codes, while **eleven sibling repos answered normally with the same token.** The token carries `repo` and
+`admin:org`; the account repo list still **shows** the repo (`public`, `push=True`,
+`default_branch=main`); yet `/repos`, `/branches/main`, `/contents/` and `/git/refs` all **404 —
+authenticated *and* anonymous.**
+
+**A permissions failure cannot 404 both the scoped-admin view and the anonymous view of a repo GitHub
+still lists for its owner. This is a repository-level restriction.** Two candidates, indistinguishable
+from outside: **the `GH013` secret-scanning event already on the record** (commit `2e763db0`, a live PAT
+in `PUSH_PROCEDURE.md:33` — the Lead's own leak), or **an abuse action against a public repo of
+C2-framework RE tooling.** Only the account notification email states which.
+
+**Nothing is lost:** 11 commits, 285 tree files, 5,034,886 B, **46 deliverables.** Exposure = **3 local
+commits.** Everything is in [`PUSH_PROCEDURE.md`](../../../../PUSH_PROCEDURE.md) including the **two
+instrument failures** that made the Lead report this repo as reachable **twice**:
+
+1. **A stale `$LASTEXITCODE` read inside a `-f` format expression** printed `OK` for every row.
+2. **`git ls-remote origin` returned `3a1729b` — a real commit, real branch, matching the last successful
+   push — that it never fetched from GitHub.** `ls-remote` exits 0 when a **local remote-tracking ref**
+   satisfies the name. **A false reading is more dangerous when it is internally consistent**, and this
+   one was maximally credible.
+
+> **Rule: never trust a ref read from a configured remote to establish remote state.** Use
+> `git ls-remote <full explicit url>`; measure `.ExitCode` from `Start-Process -PassThru`, not a shell
+> variable. **And re-check that the repo still exists before diagnosing a failed push as a credential
+> problem** — *a diagnosis that was correct last round is a hypothesis this round.*
+> **This is instrument trap #11 in a new dress: `ls-remote` on a configured remote may answer from LOCAL
+> state, and there is no warning that it did.**
+
+### D43 — Sliver inherits host proxy configuration, and it is the most thorough of the three
+
+**Lead-verified verbatim** at `implant\sliver\transports\httpclient\gohttp.go:73-100`: `parseProxyConfig`
+is called **unconditionally at the end of every driver construction**, and the mode switch reads
+`case "never": break; case "": fallthrough; case "auto":` → `:96` `transport.Proxy = http.ProxyURL(proxyURL)`.
+
+> **Go's zero-value string is `""`, and `""` FALLS THROUGH to `"auto"`. An operator who never touched the
+> setting gets AUTO-DISCOVERY, not `never`. Only the literal `"never"` opts out — the opposite of
+> fail-closed.** *Built to work behind a corporate proxy by default.*
+
+**Three frameworks, one behaviour:** Havoc `TransportHttp.c:40-42` (`WINHTTP_PROXY_INFO` /
+`WINHTTP_CURRENT_USER_IE_PROXY_CONFIG` / `WINHTTP_AUTOPROXY_OPTIONS`), Metasploit
+`rex/socket/comm/local.rb`, Sliver's own **15-file / ~86 KB provider package replacing the stdlib**
+(`ProxyFromEnvironment` = **0 hits**, against a control of `\bproxy\.` = **41 hits / 11 files**, fully
+enumerated). **Platform spread:** Windows 4-stage cascade (`GetIEProxyConfigForCurrentUser` → WPAD
+autodetect → PAC URL → named proxy → `netsh winhttp`), Linux `HTTPS_PROXY` env, **Darwin SPAWNS
+`/usr/sbin/scutil --proxy`** (`os/exec`, `provider.go:27`). **Sliver's stage 1 exceeds Havoc**
+(`WINHTTP_AUTOPROXY_AUTO_DETECT` over `DHCP | DNS_A` = **WPAD via DHCP option 252 and
+`wpad.<domain>`**).
+
+**Two findings beyond the question.** (1) **The two Windows HTTP drivers DISAGREE —**
+`drivers_windows.go:59-67`: **`WininetDriver` never calls `parseProxyConfig` and never reads
+`opts.ProxyConfig`**, so **`"never"` is silently not honoured on the WinINet path.** *Any statement about
+Sliver's Windows proxy behaviour must name the driver.* (2) **The provider package is Rapid7
+InsightVM-derived** — `provider.go:38` cites `https://test.endpoint.rapid7.com`, `provider_windows.go:118`
+sets **`userAgent = "ir_agent"`**, the UA Sliver presents when fetching a PAC file. `[inference]` —
+**residual §10.5: confirm against `LICENSE.txt`.**
+
+**The lane refused the flattering reading, and that is the strongest act of the round:** *proxy
+inheritance is ENTERPRISE REACHABILITY, not concealment.* **"A framework that ignored the host proxy
+fails to beacon on a large fraction of real targets — not because it's caught, but because its packets
+never leave."** **Three authors converging here is evidence about the DEPLOYMENT ENVIRONMENT they target,
+not their tradecraft.** **§15.5 of D17 records it as a reachability axis, deliberately NOT folded into the
+concealment table.** **Best detail: the decisive line was nine lines below where D36's read window ended**
+— *and the lane that wrote the window found it, then declined the `InternetOpenW` flag interpretation
+rather than infer from an unread call site.*
+
+### D40 — Covenant authority: three accounts of one count, all three wrong
+
+**The lane refuted its brief twice and refused to invent instructions.** *"D32 is not mine. My lanes are
+D24 and D28… Inventing instructions and then obeying them is not a thing I'll do."* **Lead error EIGHT —
+a brief addressed to the wrong lane, caught by the lane refusing to fabricate a measurement to cover it.**
+**A lane that had answered by inventing the missing measurements would have produced a fluent, wrong
+section.**
+
+**The Lead's asserted "10 cert-validation sites" does not reproduce.** Three probe shapes, three numbers:
+**Lead's unstated 10** (no run behind it) · **lane's 7 occurrences / 3 files** · **Lead this round:
+`new X509Certificate2(` = 6 in 6 files, callback-family = 9 in 7 files.** **`CovenantHubService.cs:42` is
+the PROPAGATION of `:30`'s callback, not a second site** — *counting occurrences counts a hand-off as a
+decision.*
+
+**The binary "validates / returns true" was too coarse. Classified from source into FOUR categories:**
+
+| class | sites | evidence |
+|---|---|---|
+| **unconditional true** | 1 | `CovenantHubService.cs:32`; `:27` builds the cert, **never referenced again** |
+| **real hash pin** | 2 | `CovenantAPIService.cs:23`, `InternalListener.cs:107` |
+| **not a decision** | 1 | `InternalListener.cs:125` — `return HttpClientHandler;`, a factory body |
+| **GATED two-stage pin** | 4 | `GruntHTTP.cs:859`, `GruntHTTPStager.cs:62`, `Brute.cs:556`, `BruteStager.cs:63` |
+
+**The Grunt callbacks are REAL validation that is DEFAULT-OFF** — `bool valid = true;` →
+`if (this.UseCertPinning && CovenantCertHash != "") { valid = cert.GetCertHashString() == CovenantCertHash; }`
+→ `if (valid && this.ValidateCert) { valid = errors == SslPolicyErrors.None; }` → `return valid;`.
+**Both gates are BUILD-TIME SUBSTITUTIONS emitted by the generator** (`Core\CovenantService.cs:1599-1600`,
+`{{REPLACE_VALIDATE_CERT}}` / `{{REPLACE_USE_CERT_PINNING}}`, **5 hits each** = 1 generator + 4 templates)
+**from a per-grunt operator property.** **So implant cert validation is an OPERATOR SETTING, not a code
+property.** *The vestige shows an author who WROTE the pin, replaced the comparison with `true` in one
+place, and left it intact in four others.*
+
+**The real exposure is ONE method, not 233.** `CovenantHub`: **3 public members after comment-stripping,
+0 `[Authorize]`, while all five sibling hubs carry it.** `CovenantHubService`: **233 public methods, 0
+authorization constructs — and they are CLIENT-SIDE RPC STUBS** building an outbound `HubConnection`, with
+its DI registration **commented out at `Startup.cs:196`.** *"Reporting them as '233 unauthenticated
+endpoints' would be exactly the error you named — a correct count of the wrong thing under a heading that
+makes it read as something else. The real exposure is 1 method."* **Denominator species 6, named by the
+lane and refused.**
+
+**Q5 offered a third option neither the Lead nor D32 considered:** **`return true` IS NOT AN AUTHORIZATION
+MARKER** — **exactly 1 of 16 `return true` sites tree-wide is a cert callback**; the other 15 are
+grunt-tree traversal, regex matching and messenger lifecycle. **Four of the six coordinates the brief
+supplied do not resolve** (files live at `Data/Grunt/…`; two have no `return true` at all).
+
+**Q3/Q4 close as CONTROLLED ZEROES:** no middleware, no filter, no `IAuthorizationFilter` handler, no
+`AuthorizeFilter` — **control fires (1 in control, 0 in tree)**, so **no Sliver equivalent exists.** Zero
+`OnConnectedAsync`/`OnDisconnectedAsync` overrides tree-wide. **The client PRESENTS a token at `:38`;
+nothing REQUIRES one. "Presented ≠ required."**
+
+**NEW SUB-SHAPE — word boundaries constrain TOKEN SHAPE, not CODE-VS-PROSE.** `\bfrida\b` **still matched
+inside a comment (2 when 1 was correct)**, while the 223× mechanism reproduced exactly: **225 → 3 after
+comment-stripping**, 97.3% of the file being comments. **Comment-stripping is required INDEPENDENTLY of
+word boundaries.** **Five of its six logged instrument failures are ONE shape: counting a lexical string
+and filing it under a semantic heading.**
+
+**D28 §6 CLOSED and it ESCALATES:** **`modules/getsystem.py:194` does
+`self.client.remote('pupwinutils.security', 'getsystem', False)` and drives FOUR of the five functions
+D28 left unread** — **the escalation chain is wired into an operator-exposed module**, which makes D28's
+precondition finding (`SeDebugPrivilege` `:1827` + accessible `winlogon` `:1832`) **more consequential,
+not less.** `impersonate_sid` is the one with zero external callers.
+
+### D39 — Havoc's server half: the silence is a PREPROCESSOR on one side, a RUNTIME FLAG on the other
+
+**The brief's premise inverted.** `cmd\server\dispatch.go` is **NOT** the counterpart to `Command.c` — it
+is the **GUI RPC protocol** (one function, seven switches, one `default:`, **none on the agent-command
+path**). **The real counterpart is `TaskDispatch` at `pkg\agent\demons.go:2285` — a SINGLE 4,145-LINE
+FUNCTION** whose top-level `switch CommandID` **has a `default:` at `:6419` naming the unknown command.**
+
+| | agent (`Command.c`) | server (`TaskDispatch`) |
+|---|---|---|
+| gate | **a PREPROCESSOR** — `PRINTF` → `{ ; }` (`Macros.h:57`) | **a RUNTIME BOOLEAN** — `if logger.debug` |
+| default build | **uncompilable — the code does not exist** | **`false` unless `--debug`** (`cmd\server.go:57`) |
+| emits / replies | no / no | no / no |
+
+> **"Agent silently drops, server doesn't" is FALSE. "The agent's drop is UNCOMPILABLE, the server's is
+> UNCONFIGURED" is TRUE.** Same observable, different fixability, **and only one of them is a defect.**
+> *The agent cannot be made to log without editing source; the server can be made to log with a flag.*
+
+**Q2 clean** — `cipher.NewCTR` + `XORKeyStream` (`crypt\aes.go:21-22`) is the same AES-CTR/XOR as
+`AesXCryptBuffer`. **Q3 — the header lengths disagree by 8 bytes and it still works**, because
+`ParseHeader` consumes 12 (`service\agent.go:188/194/200`) while `handleDemonAgent` consumes 8
+(`handlers\http.go:79-80`), the server decrypts from `Header.Data` **already advanced past 12**, and **the
+stray 8 bytes land in `Command`/`RequestID`, captured BEFORE the decrypt and never re-read.** *Load-bearing
+and fragile — D35's reassembly-integrity class, found a third time.* **Q5 closed:** `GetListenerDefines`
+(`builder.go:1102`) emits `TRANSPORT_HTTP`/`TRANSPORT_SMB` **at BUILD time**, no negotiation, unmatched
+type blocked by an explicit guard at `:234`.
+
+**Its correction is against ITSELF, and it is instrument shape #12 in a new form:** *"Two instruments
+disagreed, the more sophisticated one was wrong, and resolving it meant measuring the source rather than
+adjudicating between my own tools."* It also corrected the Lead's **"25 non-vendor"** figure — **0 vendor
+directories; all 202 files are Havoc's** — and four of its own.
+
+### D38 — Merlin's protocol: THREE message types, and the 286 is Metasploit's
+
+**The count is 3, by two independent methods.** **Method A:** exactly three sub-packages under
+`github.com/Ne0nd0g/merlin-message` — root, `/jobs`, `/opaque` — **each implementing its own `Type.String`
+stringer, which Go only generates for a typed enum.** **Method B:** the project's own
+**`CHANGELOG.MD:364`** — *"Reduced base message payload types to just **opaque, jobs, and checkin**."*
+**Compiler linkage and author prose agreeing.** Beyond the count: **12 `Update*` handlers**, each with a
+matching accessor and **no orphans**; **66 protocol field names** from `json:` tags, **separated from 33
+JOSE and 14 TLS fields by a CO-LOCATION TEST rather than name-guessing**; **7 transformers** sharing one
+`Construct`/`Deconstruct`/`String` contract.
+
+**The brief's asks 1 and 2 were different targets, and the lane led with that correction.** **The 286 is
+Metasploit's, not Merlin's** — `D22:261` and `D22:574` place it in `lib/rex/proto/` (Rapid7 Ruby,
+`kerberos/` 81 files, `smb/` 10); Merlin is Go and the Merlin tree is **86 files.** *"A real citation
+attached to the wrong subject — the second such fusion in two rounds, and that repetition is itself the
+finding."* **Bounded, not read into** (§4), with a method left behind: read the 91 heaviest files, report
+fraction-of-bytes.
+
+**R-29.3 partially closed:** `CHANGELOG.MD:353` names an `agent-windows-debug` target, and combined with
+D29's `0x10` renormalisation — **which a strip step cannot produce** — **the two binaries are separate
+builds, and a separate build is a choice.** *That kills the "one build, failed to strip" accident
+reading.* **What closes it: the `Makefile`. One file.** Search key: `agent-windows-debug`.
+
+**Q4 — 44/45 well-formed, 1 malformed, a hand-edit not a template.** The corrupted `remote` holds a URL
+plus a pasted transcript; the same file's `description` contains `10.211.55.4` **legitimately**, and the
+two sibling DCOM modules are **clean** — **a generator defect would show a shared pattern across
+siblings.** **Root cause: `base.json` declares `"remote": ""` with no constraint and no validator
+anywhere** — the same gap that lets `Prank.json` omit `type` entirely. **Credential scan across 83 text
+files, controlled at 45: one file carries credential material** (the 6 CLI hits are Go string tables —
+`Administrator` in five OS builds is a constant, not data).
+
+**Q5 recorded as a pre-empted error and dropped.** 0x8664 vs 0x014C, 508/1024 header bytes differ — but
+**D29 measured same-arch builds differing in 3 header bytes, so 508 is what different architectures
+produce.** *"I did not manufacture the comparison."* **The real axis is 32/64-bit coverage — a deployment
+property, not an artifact delta.**
+
+**Its own instrument discipline failed twice, both recorded rather than quietly fixed (§8.1, §8.5, §8.6 —
+six failures, one root cause).** *"5 encoders and 5 encrypters" written from SYMBOL FRAGMENTS* — printing
+the match list gave **3 and 4**. The tag census written as **46/63/8/2 before running the counter** —
+truth **72/74/14/5**, and then it **moved four more times because the section reporting the count is
+itself inside the document being counted** — a genuine **fixed-point problem.** It stopped asserting a
+frozen number and shipped **the invocation** with an as-of caveat, plus a corpus recommendation that
+D29's `81/51/13/2` **carries the same latent staleness.**
+
+> **The reusable lesson is a PREDECESSOR to the corpus rule: "print your matches" guards against a probe
+> with the wrong SHAPE. It does not guard against a probe NEVER RUN. Run the instrument, then write the
+> number.**
+
 **Last verified (round 17, re-measured file by file): 2,330.2 KB across 31 files.** Prior header said
 2,102.3 KB / 24 files at round 16. The delta is **seven new files** — `D19` (46,651 B), `D20` (25,401),
 `D21` (36,193), `D22` (34,637), `D23` (19,615), `D24` (40,456), `D25` (11,237), **+214.2 KB** — plus

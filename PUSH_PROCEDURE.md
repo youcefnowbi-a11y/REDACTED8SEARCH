@@ -96,30 +96,59 @@ permissions error does not 404 the authenticated admin view of a repo the token 
 
 **Not distinguishable without the account's notification email — the only place GitHub states the reason.**
 
+### The measurement itself was unreliable, and both failure modes are mine
+
+**I reported this repo as `git=OK` twice, and both times the reading was an artifact — not a recovery.**
+
+**Failure 1 — a stale `$LASTEXITCODE` read inside a format expression.** In the all-repo sweep I wrote
+`"  {0} {1}" -f $(if($ok){'OK '}else{'FAIL'}), $n` where `$ok` came from `($LASTEXITCODE -eq 0)`
+evaluated *after* the `-f` operator had already begun binding arguments. **Every row printed `OK`.** The
+subsequent corrected sweep, with the exit code captured on the line immediately after the call, **also
+printed all twelve `OK`** — because `ls-remote` on a URL whose repo is gone **still exits 0 when a
+remote-tracking ref satisfies the name.** Only a real process exit code settled it:
+
+```
+12 consecutive probes via Start-Process -PassThru .ExitCode:
+   exit=128  "remote: Repository not found."   x12      OK:0  FAIL:12
+CONTROL, void.git, same loop shape:
+   exit=0    ref returned                      x3
+```
+
+**Failure 2 — `ls-remote` returning a value it never fetched.** `3a1729b` is a **real local commit**, so
+the number looked entirely credible. **A false reading is far more dangerous when it is internally
+consistent**, and this one was: the SHA was genuine, in the repo, on `main`, and matched the last
+successful push. *Nothing about the value was wrong except that it did not come from GitHub.*
+
+**Reusable rule: when a remote operation's result matters, measure the exit code of a real process
+(`Start-Process -PassThru` → `.ExitCode`), not a shell variable — and never trust a ref read from a
+configured remote to establish remote state.** `git ls-remote <explicit full URL>` is the minimum bar.
+
+**And the meta-lesson, which is the same one as §14:** *a diagnosis that was correct last round is a
+hypothesis this round.* The `401` credential diagnosis was the most recent thing in memory, so a 404 was
+initially read as an auth problem and time was spent re-testing credentials that were never in question.
+
 ### What this does NOT affect
 
 **Nothing was lost.** Local state is complete and verified:
 
 ```
-HEAD            357208f0a677371a8feca0387a0bdb9aee58ed7d
-commits         10
+HEAD            8e9cae61bc83b7375504d6c0282db25dd623b7e3
+commits         11
 tree files      285
 tree bytes      5,034,886
 deliverables    46 .md under reports/DEEP
-never pushed    2 commits (16b97d9 D36/D37, 357208f D39/D40/D43)
+never pushed    3 commits (16b97d9 D36/D37, 357208f D39/D40/D43, 8e9cae6 this file)
 local remote-tracking still held: refs/remotes/origin/main 902d035
 ```
 
-**The two unpushed commits are the entire exposure, and they are 100% local.** Recovery is one push to
-any working remote.
+**The exposure is 3 commits, and they are 100% local.** Recovery is one push to any working remote.
 
 ### Operational rule adopted
 
-**Always push to an EXPLICIT URL with an inline token, and verify by re-reading the remote refs through
-the same authenticated URL.** Do not verify with bare `git ls-remote origin`. **And re-check that the repo
-still exists before assuming a push failure is a credential problem** — this round cost time treating a
-404 as an auth failure, because the earlier `401` diagnosis was the most recent one in memory.
-*A diagnosis that was correct last round is a hypothesis this round.*
+**Always push to an EXPLICIT URL with an inline token, and verify with `git ls-remote <full url>`.**
+**Do not verify with bare `git ls-remote origin`.** **And re-check that the repo still exists before
+assuming a push failure is a credential problem** — a repository can be restricted between rounds, and
+this one was. **The repo must also be re-created or restored before any further push can succeed at all.**
 
 ## Diagnosing a hang, if this recurs
 
