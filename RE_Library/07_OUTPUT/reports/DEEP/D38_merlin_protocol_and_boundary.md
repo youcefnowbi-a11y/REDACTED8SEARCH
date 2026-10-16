@@ -172,7 +172,10 @@ github.com/Ne0nd0g/merlin-message
 |---|---|
 | `standard` | **55** |
 | `extended` | **6** |
-| **absent** | **2** |
+| **blank (`base` present, `type` absent)** | **1** |
+| **`base` absent entirely** | **1** |
+
+`[verified]` **The two non-conforming files are distinct cases and must not be merged into "blank × 2"** — a first draft of this section did exactly that, and the final verification pass separated them. The distinction is load-bearing: one is a **module with a missing field**; the other is **not a module**.
 
 | Top-level key set | Count |
 |---|---|
@@ -260,6 +263,362 @@ transformers/encrypters/aes.(*Encrypter).String       ← and identically for jw
 
 `[inference]` **Consequence, and it loops back to D29 §3.5.** D29 established that module `remote` URLs are fetched **by the agent at runtime** over the agent's transport. §3 shows that transport is **one of five client packages, parameterised by a choice of 3 encoders × 4 encrypters.** `[inference]` **A defender cannot assume a fixed Merlin byte-signature** — the channel is parameterised on two independent axes and **the server end is agnostic to both.** D29 §3.5's deployment-property framing is corroborated without re-derivation.
 
-`[absence]` **Whether the *operator* (CLI) side also lacks transformers was NOT tested.** `merlinCLI-*` binaries were not swept. Stated as an unclosed bound, not as a negative.
+`[verified]` **The probe was extended across all four binaries, and it closes the asymmetry precisely:**
+
+| Binary | `transformers/*` | `merlin-message` refs | Reading |
+|---|---|---|---|
+| `merlinAgent-Windows-x64.exe` | **7** | 14 | holds the full transform set |
+| `merlin.x64.dll` | **7** | 30 | **identical 7** — the DLL wraps the agent |
+| `merlinServer-Windows-x64.exe` | **0** | 26 | links the protocol, holds no transformers |
+| `merlinCLI-Windows-x64.exe` | **0** | **0** | links **neither** |
+
+`[absence]` **The CLI `[absence]` that the previous draft of this section left open is now closed.** `[verified]` **Positive control:** the identical probe returns **7** on both the agent and the DLL, and the DLL returns 30 `merlin-message` references — so the sweep demonstrably bites on files in this same directory. `[inference]` **A zero on the CLI is therefore a real zero, not an untested instrument** — exactly the D29 §5.4 control rule.
+
+`[verified]` **The identical 7 in the agent and the DLL is itself a confirmation.** `merlin.x64.dll` is the Go c-archive wrapped by `gcc -shared` (D29 §1.3's prologue split). `[inference]` **It carries the agent's transformers because it *contains* the agent**, not because the DLL has its own. **D29 §1.5's one-action reading holds at the package level too.**
+
+`[inference]` **The CLI's `merlin-message` = 0 is the sharper structural fact.** The server links the protocol (26 refs) but not the transformers; the CLI links **neither**. `[inference]` **So the operator's console speaks to the server in some *other* vocabulary — the CLI is a client of the server's API, not a participant in the agent protocol.** `[verified]` Consistent with `CHANGELOG.MD` line **412**: *"Added API packages for agents, listeners, modules, and messages to separate the CLI from the server."* **The CLI was deliberately decoupled from the wire protocol**, and its zero is that decision's footprint.
 
 ---
+
+## §4 The 286 — bounded, not swept
+
+### 4.1 What the 286 actually is
+
+`[verified]` **The 286 is Metasploit, and it is not in this target.** D22 §4.1 line **261** and §7 U3 line **574** both define it as `lib/rex/proto/` — **286 of 302 files unread**, across **45 protocol directories**, with `kerberos/` (81 files, 383 KB) and `smb/` (10 files, 181 KB) dominant.
+
+`[verified]` **Census of the Merlin tree (the target this report is named for): 86 files under `data`**, across 7 extensions (§1.1). **Zero** are under any `lib/rex/` path. `[absence]` **Positive control:** the census enumerates all 86 with sizes, so the negative is real.
+
+`[inference]` **The 286 cannot be bounded *within* this deliverable because it is not in this deliverable's target.** §4.2 states the boundary; §4.3 states what would close it.
+
+### 4.2 The boundary, stated as a boundary
+
+| Question the brief asked | Answer under this target |
+|---|---|
+| What ARE the 286? | **Metasploit `lib/rex/proto/` Ruby files.** From D22; re-confirmed by re-reading D22:261 and D22:574. **Not Merlin.** |
+| Protocol semantics vs. scaffolding fraction? | **Not answerable here** — requires reading Ruby, which §0.2 excludes. |
+| Read the protocol-meaningful subset | **The Merlin protocol subset is read, §1–§3: 86 files under `data`, not 286.** |
+
+`[inference]` **The honest framing: the brief's ask 2 and ask 1 are one ask and a *different* ask.** §1–§3 close the Merlin protocol question well enough to state a count with two agreeing methods. **§4 exists so the 286 is neither silently inherited as closed nor silently expanded into a Ruby sweep.**
+
+### 4.3 A justified boundary for the 286 — method, not performed
+
+`[inference]` **D22 already answered the *transport* question without the 286** (D22 §4.2: transport/TLS/proxy are decided in `Rex::Socket`; every `lib/rex/proto/` directory is a pass-through caller). `[inference]` **So the 286's remaining value is protocol-specific *parsing* behaviour** — D22 §7 U3 says this.
+
+`[inference]` **Proposed boundary, ready for the lane that owns Metasploit:**
+
+1. **`kerberos/` (81 files, 383 KB) + `smb/` (10 files, 181 KB) are ~1.5×`http/` each by bytes.** Reading **91 of 286 files** covers both heaviest protocols.
+2. **The remaining 43 directories average ~5 files each** — thin parsers for small wire formats.
+3. **Census with control:** enumerate all 286 with size, confirm the 302 total, read the 91, report the **fraction of bytes** read.
+
+`[inference]` **Not performed here — it is Metasploit work under a Merlin deliverable.** Recorded so the partition need not be re-derived.
+
+---
+
+## §5 R-29.3 — closing or bounding the strike against D29 §2
+
+### 5.1 The residual, restated exactly
+
+`[read]` **R-29.3 (D29 §6.2):** *whether the server's un-stripped state is authorial design or a pipeline accident is **NOT established** — the Merlin source tree is absent, so the build pipeline could not be read; **this is the largest threat to §2's "design statement" reading**, unknown in both directions.*
+
+### 5.2 What this pass adds — the build system, partially recovered
+
+`[verified]` **The Merlin Go source tree is still absent.** Recursive enumeration of the archive returns **86 files under `data`**; the only source-like directory, `data\src\`, contains **exactly 1 file — `README.MD` (126 B) — and its sole subdirectory `cobbr\SharpGen` contains 0 files.** It is an empty placeholder for a third-party .NET tool, not Merlin source. `[read]` `data\src\README.MD`: *"This directory holds the source code of 3rd party tools."* `[absence]` **Positive control:** the same listing returns all 86 files with sizes, so an empty subtree is an observed empty subtree, not a failed listing.
+
+`[verified]` **Correction to this section's first draft, which said `data\src` "contains 0 files."** The measured value is **1** (`README.MD`); it is the **`cobbr\SharpGen` subtree** that is empty. **The conclusion is unchanged — there is no Merlin Go source anywhere in the tree — but the count is stated as measured.** Recorded rather than silently amended, per this report's own §8.5.
+
+`[inference]` **But the build pipeline leaves a fingerprint, and this pass found it.** `[verified]` `CHANGELOG.MD` line **353**: *"Added Makefile `agent-windows-debug` build target to enable viewing verbose and debug messages."*
+
+`[inference]` **That is the decisive artifact-adjacent fact.** It establishes:
+
+1. **A distinct Makefile target exists for the debug build** — release-vs-Debug is a **build-system** distinction, not post-processing of one artifact.
+2. **The debug target's stated purpose is behavioural** — *"to enable viewing verbose and debug messages"* — changing **log verbosity**, which is what D29 §4.5 inferred from the `.rdata`/`.data` deltas.
+3. **The two binaries are separate builds**, which is exactly why D29 §4.1's `.text` delta is a **linking** artifact (the `0x10` basis shift), not a source change.
+
+`[inference]` **This partially closes R-29.3 in the direction that *weakens* the accident reading.** If release and debug were one build plus a strip step, the `.text` would be **byte-identical**. `[verified]` D29 §4.1 measured **80 differing `.text` bytes** producing a uniform `0x10` renormalisation — **that is a re-link, and a re-link means the release binary was built separately.** `[inference]` **A separately-built release binary is a pipeline *choice*, not an accident that failed to strip one artifact.**
+
+### 5.3 Closed and still open — the refined question
+
+| Sub-question | Status |
+|---|---|
+| Are the two agent binaries separate builds? | **CLOSED — yes.** The `0x10` renormalisation is a linking artifact; a strip cannot produce it. `CHANGELOG.MD:353` corroborates. |
+| Does a debug build target exist? | **CLOSED — yes.** `agent-windows-debug` |
+| Did the build system **intend** to strip the release binary? | **STILL OPEN.** The Makefile is absent. |
+| Does the **server** share the agent's build system? | **STILL OPEN — the load-bearing gap.** The server is `buildmode=exe` like the agent (D29 §2.3), but is **not mentioned** in line 353. Nothing establishes whether a server debug target exists, or whether the server simply ships unstripped because nobody added `-w` to its target. |
+
+`[inference]` **R-29.3 is PARTIALLY closed, and the remainder is narrower and sharper.** The original formulation — *"authorial design or pipeline accident"* — is now **too coarse**. The refined question:
+
+> **`[inference]` Does the server build target omit `-w` deliberately, or has it simply never been swept up by the flags the agent target carries?**
+
+`[inference]` **What would close it, exactly: the Merlin repository's `Makefile`** — specifically the server build target's flag list. **That is one file.** `[verified]` It is not in this archive and **no fetch was performed**. `[inference]` **`agent-windows-debug` is the search key that finds it.**
+
+`[inference]` **Bounded in both directions, as D29 required.** The evidence **strengthens** the deliberate reading (a separate build is a choice) without **proving** intent for the *server* specifically. D29 §2 should be read as **"the asymmetry is real and is a build-level fact"** — which its own §2.5 already says — and **not** as **"the author chose to ship the server debuggable,"** which remains unestablished.
+
+---
+
+## §6 The corrupted `remote` field, quantified
+
+### 6.1 How many of the 45 are well-formed — the direct answer
+
+> **`[verified]` 44 of the 45 are well-formed. Exactly 1 is malformed.**
+
+`[verified]` **Method:** every one of the 63 module JSONs was parsed with `ConvertFrom-Json`, its `base.remote` read, and the value tested on two conditions — **contains whitespace** (`\s`) and **does not begin with `http://`/`https://`**. A value passes only if whitespace-free **and** carrying an HTTP scheme.
+
+| Result | Count |
+|---|---|
+| non-empty `remote` | **45** |
+| well-formed | **44** |
+| **malformed** | **1** |
+
+`[verified]` **The malformed one is `modules\windows\x64\powershell\lateral\dcom\Get-ExecutionCommand.json`** — the only `remote` value in the tree containing whitespace. There is **no second** malformed file and **no** value that is whitespace-free but lacks an HTTP scheme.
+
+`[verified]` **METHOD B — shape partition.** Grouping the 45 by structure returns three buckets summing to 45: **41 raw.githubusercontent branch-paths**, **3 gist pinned URLs**, **1 multiline/whitespace**. **Both methods agree that exactly one value is anomalous.**
+
+`[verified]` **Reconciliation with D29 §3.2 — a measure difference, pinned precisely.** D29 reported **42 raw + 3 gist**; this strict partition returns **41 + 3 + 1**. **The extra raw count in D29 is the corrupted field itself** — it *begins* with a raw URL and continues onto further lines, so a **prefix** test counts it as raw while a **whole-value** test rejects it. **No number in D29 is wrong; these are different tests, and this section states the stricter one.**
+
+### 6.2 One mistake or a pattern — "one mistake, with a traceable cause"
+
+> **`[verified]` A single field-level mistake, not a generator defect — and the cause is identifiable.**
+
+`[verified]` The **`description`** field of the same file independently contains the same lab context, properly phrased:
+
+> *"…checks if the principal-identity is granted to interact with {00020812-…} CLSID object through **10.211.55.4** ip address using **lab\\administrator** credentials, then it will generates the execution command."*
+
+`[verified]` The **`remote`** field holds the URL **plus a pasted operator transcript**:
+
+> `https://raw.githubusercontent.com/ScorpionesLabs/DVS/master/DVS.psm1` **then** `PS> Get-ExecutionCommand -ObjectName "…" -ObjectPath "DDEInitiate" -HostList "10.211.55.4" -Username "lab\Administrator" -Password "Aa123456!" -Verbose`
+
+`[inference]` **The cause is authoring contamination, not a generator bug.** `10.211.55.4` is *legitimately part of this module's documentation* — the module was written against a lab. **What went into `remote` is that same lab context plus a shell transcript**, i.e. **an example command line pasted into the wrong field of one file.** `[verified]` Corroborating: `10.211.55.4` appears in **only this one** module's `remote` but in its `description` legitimately, and the two sibling DCOM modules (`Invoke-ExecutionCommand`, `Invoke-RegisterRemoteSchema`) contain **no** `10.211.55.4` in raw text.
+
+`[inference]` **A generator defect would show a shared pattern** — the same corruption across sibling files from one process. The three DCOM modules are siblings generated the same way, and **only one is affected.** That is a hand-edit, not a template.
+
+### 6.3 Why nothing caught it — the schema has no validator
+
+`[verified]` `modules\templates\base.json` declares **`"remote": ""`** — a bare string with **no pattern constraint, no format hint, and no validation hook anywhere in the schema.** `[verified]` `modules\README.MD` describes `remote` **only as a type** (line 18's table).
+
+`[inference]` **The generalizable finding: the module schema has no content validation for `remote` at all.** The **same absence explains §2.2's `Prank.json`** — a real module with the `type` discriminator **entirely absent**, which the schema also does not prevent. **Two independent field-level defects, one shared cause: a schema that declares fields without constraining them.**
+
+`[inference]` **That elevates it above an anecdote without overstating it.** It is **not** a generator defect producing corrupted files; it is **a validation gap that permits hand-edits to ship unvalidated.** The distinction matters: the first implies more corrupted files exist; the second predicts **exactly as many as were hand-edited** — on this evidence, **2.**
+
+### 6.4 Credential material across the tree — scanned, counted, controlled
+
+`[verified]` **Scope:** all **83 text files** in the Merlin tree (`.json`, `.MD`, `.md`, `.c`, `.def`, `.txt`, `.ps1`, `.go`, and extensionless). Patterns use **word boundaries** and explicit case-insensitivity.
+
+| Pattern | Files matched | Assessment |
+|---|---|---|
+| `10.x.x.x` internal IP | **3** | 1 is the `remote` corruption; 2 are `description` documentation |
+| `Administrator` \| `Aa123456!` | **9** | **6 are CLI binaries** (Go string tables, not leaks); **3 are module JSONs** |
+| `-Username "…"` | **2** | both DCOM modules, as example syntax |
+| `"…password…":` JSON key | **0** | **no credential-keyed JSON anywhere** |
+| `password[=:]<value>` literal | **0** | **none** |
+
+`[verified]` **CONTROL: files containing `raw.githubusercontent.com` = 45**, matching §6.1's non-empty count exactly — proving the scan reaches the module set. **Without it the zeros above would be untrustworthy** (D29 §5.4).
+
+> **`[verified]` One file carries live-looking credential material: `Get-ExecutionCommand.json` — `lab\Administrator` / `Aa123456!`. No other file in the tree does.**
+
+`[inference]` **The 6 CLI-binary hits are correctly excluded and the exclusion is checkable.** `[verified]` `Administrator` is an ordinary Windows account name appearing in Go's **localized string tables** across `merlinCLI-Linux-arm`, `-arm64`, `-x64`, `-Darwin-arm64`, `-Darwin-x64`, and one more — **the same word in five OS/arch builds is a string constant, not data.** `[inference]` **The test that separates a leak from a constant: does the value co-occur with a password?** None of the CLI hits does.
+
+`[absence]` **Credential liveness remains UNKNOWN and out of scope.** `[verified]` **No network action was taken.** `[inference]` `10.211.55.4` is **RFC1918**, i.e. **not publicly routable** — a property of the address, not of the credentials. `[read]` D29 §6.2's R-29.1 remains open.
+
+### 6.5 The generalized finding, stated once
+
+`[inference]` **Three defects, one shape — this section's real output:**
+
+| File | Field | Defect | Schema prevents it? |
+|---|---|---|---|
+| `Get-ExecutionCommand.json` | `remote` | URL + pasted transcript + credential | **No** — unconstrained string |
+| `Prank.json` | `type` | discriminator absent entirely | **No** — README:184 calls `type` a "placeholder" |
+| *(any)* | any | — | **No validator exists in the schema** |
+
+`[inference]` **D10 and D22 both counted these 63 modules; neither was looking for malformed fields, so neither found them — and that is not a failure of either lane.** `[inference]` **The defect class is only visible if you test values rather than enumerate keys**, which is why it surfaced here: the brief asked *"how many of the other 44 are well-formed?"* — a **value** question, not a **presence** one. **That is the reusable lesson.**
+
+---
+
+## §7 The DLL pair — pre-empted error, recorded and dropped
+
+### 7.1 Recorded, as instructed
+
+`[verified]` **`merlin.x64.dll` and `merlin.x86.dll` are NOT a comparison pair.** Machine types are **`0x8664` (AMD64)** vs **`0x014C` (I386)**; **508 of the first 1,024 header bytes differ.**
+
+`[inference]` **That byte count is the decisive evidence.** Two builds of the *same* architecture from the *same* source differ in a handful of header bytes — D29 §4.2 measured **3**. **508 is 169× that**, which is what different architectures and different linkers produce. Any per-field comparison across this pair would compare an AMD64 layout against an I386 layout; **past the COFF header every field offset diverges structurally, so no delta would be interpretable.**
+
+`[inference]` **Recorded as a pre-empted error, exactly as directed. No comparison was manufactured.**
+
+### 7.2 Is there a meaningful axis — the honest answer
+
+`[inference]` **There is a real axis, but it is a *set* comparison, not a pair, and not a §4-style binary delta.** `[verified]` The true relationship:
+
+| Artifact | Arch | Content relationship |
+|---|---|---|
+| `merlin.x64.dll` | AMD64 | wraps the **x64** agent |
+| `merlin.x86.dll` | I386 | wraps the **x86** agent |
+| `merlinAgent-Windows-{x64,x86}` | AMD64 / I386 | the wrapped agents |
+
+`[inference]` **The meaningful axis is 32-bit vs 64-bit *coverage* — which targets a given Merlin build serves** — a **deployment property**, not an artifact delta. `[verified]` §3.4 confirmed the transformer set is **identical in DLL and agent.** `[inference]` **The two DLLs are one wrapper at two target architectures, and the axis that matters is which an operator would need — an operator's decision, not an analyst's finding.**
+
+`[inference]` **Explicitly NOT done:** no per-field delta, no "N bytes differ" claim, no architecture-mismatch arithmetic. **Declining to manufacture the comparison is the deliverable here.**
+
+---
+
+## §8 Instrument record
+
+**Mandatory.** The corpus logged **eight** instrument failures across six agents, one root cause: **a probe whose shape does not match the evidence's shape.** This lane produced **four** on D29 and **two** on D38.
+
+### 8.1 D38 failure 1 — the transformer count, read off symbol fragments
+
+| | |
+|---|---|
+| **Probe** | Read the transformer count from **symbol suffixes** in a package-name sweep (`gob.`, `rc4.`, `base64.`, `hex.`, `aes.`, `jwe.`, `xor.`) |
+| **Result** | **"5 encoders and 5 encrypters"** |
+| **Truth** | **3 encoders (`base64`, `gob`, `hex`), 4 encrypters (`aes`, `jwe`, `rc4`, `xor`) = 7** |
+| **Root cause** | The suffixes are **trailing-dot symbol fragments**, not directory names. I counted *fragments of a partial match* and inferred a total |
+| **Caught by** | **Printing the full match list** — the fix, `transformers/([a-z]+)/([a-z0-9]+)` deduped on the pair, returns exactly 7 |
+
+`[inference]` **Same failure as D29 §5.5, and the Lead's rule names it exactly: an estimate wearing an enumeration's clothes.** The "+2 more" and "+1 more" were **extrapolations**, and they were wrong. **Printing matches is what caught it.**
+
+### 8.2 Failure 2 — the enum-value probe that found gRPC logging
+
+| | |
+|---|---|
+| **Probe** | Scan the server's 8.25–8.60 MB region for a contiguous blob containing candidate message-type names |
+| **Result** | `GrpcLogEntry`, `statusCode`, `payloadTruncated`, `timeout` — **gRPC logging identifiers** |
+| **Truth** | **Not a stringer table.** The first `AgentInfo` occurrence was a **coincidental cluster** |
+| **Caught by** | **Reading the returned strings and noticing they were all the same domain** — a real `Type` stringer would contain *message* names, not *log* field names |
+| **Disposition** | **Recorded and abandoned. Not written up as a finding.** §1.6 states the enum values as unrecovered |
+
+`[inference]` **The near-miss is worth stating.** A probe returning "plausible protocol words near a protocol symbol" is exactly the shape that invites a fabricated enumeration — **the output *looked* like message types.** Only reading the list instead of counting it stopped it.
+
+### 8.3 Probes that behaved — with their controls
+
+| Probe | Zero or negative result | Positive control | Verdict |
+|---|---|---|---|
+| `[absence]` `lib/rex/` under the Merlin tree | none | same census enumerated all **86** files with sizes | **real absence** |
+| `[absence]` transformers in the server | 0 | same probe → **7** on agent, **7** on DLL | **real absence** |
+| `[absence]` transformers in the CLI | 0 | same probe → 7 on sibling binaries in the same directory | **real absence** |
+| `[absence]` `merlin-message` in the CLI | 0 | same probe → **14** on agent, **26** on server | **real absence** |
+| `[absence]` credential-keyed JSON | 0 files | `raw.githubusercontent.com` control → **45 files** | **real absence** |
+| `[verified]` 45 non-empty `remote` | 45 | strict shape partition → **41 + 3 + 1 = 45** | **confirmed** |
+
+`[inference]` **Six real absences, each with a sibling control that succeeded.** Per D29 §5.4, none is an untested instrument.
+
+### 8.4 Carried forward from D29
+
+`[read]` D29 §5.1 the nested-field probe (`$j.remote` → clean 0, truth 45); §5.2 the DWARF name probe (→ 0, truth 6,334,976 B); §5.3 the tasking's own Q4 pair (`merlin.exe` absent); §5.5 the tag counters (`Select-String '\[verified\]'` → 1 because the file's tag syntax varied; `.Split('`verified`')` → 13,613 because PowerShell's single-arg `.Split` takes a **char array**). **All four were this lane's.** `[inference]` **D38 §8.1 is the fifth consecutive instance of the same root cause, and the first caught by the "print your matches" rule rather than by luck.**
+
+### 8.5 Failure 3 — the tag counts, written before they were measured
+
+| | |
+|---|---|
+| **Probe** | **None.** The four figures were written into §10.4's table from memory of the document, and the instrument was run **afterwards** |
+| **Result as written** | **46 / 63 / 8 / 2** |
+| **Truth** | **72 / 74 / 14 / 5** |
+| **Root cause** | **The measurement was not performed.** I estimated the document's tag density and wrote the estimate into a table that carries a `[verified]` tag |
+| **Caught by** | Running the tag counter as a **verification step** and finding a 57% discrepancy — and per D29 §5.5, being **professionally embarrassed** that a `[verified]` tag was placed on an unverified figure |
+
+`[inference]` **This is the sixth instance of the corpus's one root cause in this lane alone, and it is the *same* failure as D29 §5.5** — differing only in that D29's was caught by an absurdly low number and this one by an absurdly low number *again*. **The mechanism is identical: a number produced by mental model rather than by instrument.**
+
+`[inference]` **The generalizable lesson, and it is not the same as "print your matches":** that rule guards against **a probe whose shape is wrong**. This failure was **a probe never run at all.** `[inference]` **A `[verified]` tag is a claim that an instrument produced the value — and the only defence is that the instrument must be run *before* the tag is written, not after.** `[inference]` **Corollary, offered to the corpus: "print your matches" needs a predecessor rule — *run the instrument, then write the number.*** The ordering is the whole content of it.
+
+### 8.6 Failure ledger for this lane
+
+| # | Where | Instrument | Wrong | Right | Caught by |
+|---|---|---|---|---|---|
+| 1 | D29 §5.1 | `$j.remote` | 0 | **45** | D10's published count |
+| 2 | D29 §5.2 | `.debug_*` name search | 0 | **6,334,976 B** | reading the section table |
+| 3 | D29 §5.3 | the tasking's Q4 pair | `merlin.exe` | **agent release vs Debug** | glob positive control |
+| 4 | D29 §5.5 | tag counters | 1 / 13,613 | **81/51/13/2** | absurdity + form print |
+| 5 | D38 §8.1 | transformer suffixes | 5 + 5 | **3 + 4 = 7** | printing matches |
+| 6 | D38 §8.5 | **nothing** | 46/63/8/2 | **72/74/14/5** | running it late |
+
+`[inference]` **Six failures, one root cause, and two of them (#5, #6) are this lane's *own counts of its own document*.** The rule that catches #5 is printing matches. **The ordering rule that catches #6 is running the instrument first.** #5 and #6 are the two halves of one discipline.
+
+---
+
+## §9 Residual unknowns
+
+### 9.1 Carried
+
+| ID | Question | Status after D38 |
+|---|---|---|
+| **R-29.1** | Are the leaked `lab\Administrator` credentials live? | **OPEN — out of scope.** `10.211.55.4` is RFC1918, not publicly routable. No network action taken. |
+| **R-29.2** | The specific 16-byte change producing the `0x10` shift | **OPEN, narrowed.** §5.2 establishes two **separate builds**, so the difference is **linker-level**, not a source edit. |
+| **R-29.3** | Is the server's un-stripped state design or accident? | **PARTIALLY CLOSED (§5.3).** Separate-build **closed**; server build-target intent **open**. Closing artifact: **`Makefile`**, search key **`agent-windows-debug`**. |
+| **R-29.4** | Is `10.211.55.4` unique to one module? | **CLOSED — yes, in `remote`.** §6.4: one `remote` field; present in that file's `description` legitimately. |
+| **R-29.5** | The three gists' content was not read | **OPEN, unchanged.** No fetch performed. |
+
+### 9.2 New in D38
+
+| ID | Question | Why open | What would close it |
+|---|---|---|---|
+| **R-38.1** | The `merlin-message` enum **values** (literal type strings) | §1.6 — stringer table not located; §8.2 failed | `merlin-message` v1.3.0 source, or one decompile of `merlin-message.Type.String` |
+| **R-38.2** | Does `Prank.json`'s missing `type` break it at runtime? | §2.2 — README:184 calls `type` a "placeholder" | The module loader's source, or one execution |
+| **R-38.3** | Malformed fields in the **other** `base` fields? | §6 tested `remote` and `type` only | A validator pass over all 15 `base` fields |
+| **R-38.4** | Does the CLI's protocol-free design prevent it driving an agent directly? | §3.4 — CLI has 0 `merlin-message` refs | The CLI↔server API surface (`merlin/v2/pkg/*`, CHANGELOG:412) |
+| **R-38.5** | Metasploit's 286 `lib/rex/proto/` files | **Out of target (§0.2, §4)** | The Metasploit lane, using §4.3's partition |
+
+---
+
+## §10 Method notes
+
+### 10.1 Why no provider was opened
+
+`[verified]` **No binary provider (Ghidra/REA) was opened for any part of D38.** Every fact came from **PE/Go symbol tables**, **embedded Go string literals and `json:` struct tags**, the **shipped `.json` schema and templates**, and **`CHANGELOG.MD`**.
+
+`[inference]` **The un-stripped server made the protocol enumerable without a disassembler.** `[inference]` **D29 §2's asymmetry is therefore not only a distribution finding — it is the reason this report could be written at all.** A second, independent benefit of the same trait, worth the corpus noting.
+
+### 10.2 Source availability
+
+`[verified]` **No Merlin Go source is present.** `data\src\cobbr\SharpGen` is an **empty directory** (§5.2). **No `.go` file was read in this pass**, so no claim here rests on source.
+
+### 10.3 Counting method, stated once
+
+| Count | Method A | Method B |
+|---|---|---|
+| 3 base message types | symbol topology (3 `Type` stringers) | `CHANGELOG.MD:364` |
+| 66 protocol fields | `json:` tag sweep minus JOSE/TLS | co-location test + presence in both binaries |
+| 7 transformers | directory extraction, deduped | full symbol print, grouped by direction |
+| 45 / 44 / 1 remotes | `ConvertFrom-Json` + format test | shape partition summing to 45 |
+| all 10 long tags in both binaries | `IndexOf` per binary | printed forms |
+
+### 10.4 Tag legend
+
+| Tag | Meaning |
+|---|---|
+| `[verified]` | Read directly from a byte-level instrument or a shipped file; reproduced by a second method or a control |
+| `[inference]` | Reasoning over verified facts; not directly observed |
+| `[absence]` | A negative result **with a positive control on a sibling artifact** |
+| `[read]` | Inherited from a prior lane without independent re-derivation |
+
+`[verified]` **Tag counts recomputed by printing matched forms, not by pattern alone** — the method mandated after D29 §5.5:
+
+| Tag | Count |
+|---|---|
+| `[verified]` | **79** |
+| `[inference]` | **79** |
+| `[absence]` | **14** |
+| `[read]` | **6** |
+
+`[verified]` **METHOD B** for these four figures: literal `IndexOf` walks over the same file text. **Both methods agree on all four.** Exactly **2** unbracketed `` `verified` `` tokens appear as **quoted prose** where this report describes the old inconsistent spelling; they are **excluded** from the counts, verified by reading each in context.
+
+`[verified]` **A tag census of a document that discusses its own tag census is not a stable quantity, and this table moved three times during drafting: 46/63/8/2 → 72/74/14/5 → 76/79/14/5 → 79/79/14/6.** Each move happened because **the section recording the previous miscount was itself tagged.** The figures above were read off the instrument **after the file was otherwise final.**
+
+`[inference]` **The durable form of this claim is the invocation, not the number** — per the corpus rule that *a numeric claim needs the invocation, not the location.* Anyone can re-derive the census at any revision with:
+
+```powershell
+$txt = [IO.File]::ReadAllText($f)
+'verified','inference','absence','read' | % {
+  '{0,-10} {1,4}' -f $_, ([regex]::Matches($txt, '`\[' + $_ + '\]`')).Count }
+```
+
+`[verified]` **These figures were also wrong in the first draft — 46 / 63 / 8 / 2 — and are corrected here, not quietly fixed.** That is this lane's **sixth** instance of the corpus's one root cause and **D38 failure 3** (§8.5). **The pattern is unmistakable:** every wrong number was written from **memory of the document's shape** rather than read off an instrument. **The correct sequence is measure-then-write; three times here I wrote-then-measured.**
+
+### 10.5 Scope statement
+
+`[verified]` **Artifacts analysed:** `merlinAgent-Windows-x64.exe`, `merlinServer-Windows-x64.exe`, `merlin.x64.dll`, `merlinCLI-Windows-x64.exe`, `CHANGELOG.MD`, `data\README.MD`, `data\modules\README.MD`, `data\modules\templates\{base,powershell}.json`, all **63** module JSONs, and `merlin.def` / `merlin.c` by reference from D29.
+
+`[verified]` **NOT analysed:** `merlin.x86.dll`; non-Windows agent/CLI builds (inventoried by name only); `merlinAgent-Windows-x64-Debug.exe` (D29 §4 owns it); the x509 material; the `agents`/`log` directories; and **Metasploit's 286 `lib/rex/proto/` files**, deliberately (§0.2, §4).
+
+`[inference]` **No claim extends beyond this set.**
+
+---
+
+*End of D38.*

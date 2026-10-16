@@ -2,8 +2,10 @@
 
 **Target:** `RE_Library/01_SOURCE_c2/havoc/teamserver/`
 **Authored by:** havoc-deep. Direct continuation of D34 (the agent half).
-**Question set:** five, from the Lead's tasking. §1–§5 below, one per question.
+**Question set:** five, from the Lead's tasking. §2–§6 below, one or more per question.
 **Source-only. Every number carries the invocation that produced it. No REA, no Ghidra.**
+
+**Headline:** the two dispatch halves are **not** mirrored constructs — the agent uses a function-pointer table, the server uses a `switch` **with** a `default:`. Both are silent in a default deployment, for different reasons. All five questions are answered in §7.1.
 
 ---
 
@@ -14,7 +16,7 @@
 | **1** | Scope, layout, and a premise correction | — |
 | **2** | `crypt/aes.go` — server cipher vs agent cipher | **Q2** |
 | **3** | The 20-byte header — does the server agree? | **Q3** |
-| **4** | `dispatch.go` — the server's counterpart to `Command.c` | **Q1** |
+| **4** | Server command dispatch — where it actually lives | **Q1** |
 | **5** | `pkg/agent/demons.go` — bounded enumeration | **Q4** |
 | **6** | Carrier selection — server side | **Q5** |
 | **7** | Residual unknowns, corrections, coverage | — |
@@ -618,7 +620,7 @@ Select-String '^type ' over demons.go  →  0 hits
 
 ### 5.3 The types it operates on, enumerated from `types.go`
 
-**16 type declarations in the package. No type is declared in `demons.go`.** [source: `Select-String '^type \w+ (struct|interface)'` over `pkg/agent/` → 16 hits, `types.go:19-212`]
+**15 type declarations in the package. No type is declared in `demons.go`.** [source: `Select-String '^type \w+ (struct|interface)'` over `teamserver/pkg/agent/*.go` → **15 hits**; positive control: `Select-String '^type '` over `demons.go` → **0 hits**. **I first wrote 16 in this section and the table below has 15 rows — the count was corrected against the invocation.**]
 
 | Line | Type | Kind |
 |---|---|---|
@@ -640,7 +642,7 @@ Select-String '^type ' over demons.go  →  0 hits
 
 [source: `Select-String '^type \w+ (struct|interface)'` over `teamserver/pkg/agent/*.go`, complete]
 
-**So the "register" is: an `Agent` struct carrying session state, an `AgentInfo` describing the host, an `Agents` collection, an 1,275-line teamserver interface contract, and six supporting structs for pivots/downloads/BOF-callbacks/port-forwards/socks.** **`demons.go` supplies the behaviour; `types.go` supplies the nouns.**
+**So the "register" is: an `Agent` struct carrying session state, an `AgentInfo` describing the host, an `Agents` collection, a 1,275-line teamserver interface contract, and six supporting structs for pivots/downloads/BOF-callbacks/port-forwards/socks.** **`demons.go` supplies the behaviour; `types.go` supplies the nouns.**
 
 ### 5.4 `TaskPrepare` — `switch Command` with 120 case labels
 
@@ -698,4 +700,205 @@ case DEMON_COMMAND_PROC_MEMORY:
 
 ---
 
-*(§6 follows)*
+## 6. CARRIER SELECTION — THE SERVER SIDE (Q5)
+
+**Q5 was: the agent's carrier is compile-time (`#ifdef TRANSPORT_HTTP` / `TRANSPORT_SMB` at `Transport.c:60, 75`). How does the SERVER decide which carrier a given agent uses? Listeners, per-agent config, or negotiation? And if a mismatch is possible, is there an error path?**
+
+**Answer: it is a listener type chosen when the payload is built, it is compiled into the agent as a preprocessor define, and there are exactly two cases with no `default` — so an unrecognised listener type produces an agent with NO transport macro at all, and no error.**
+
+### 6.1 The decision is one switch, at build time, with two cases and no default
+
+```go
+func (b *Builder) GetListenerDefines() []string {
+	var defines []string
+
+	switch b.config.ListenerType {
+
+	case handlers.LISTENER_HTTP:
+
+		defines = append(defines, "TRANSPORT_HTTP")
+		break
+
+	case handlers.LISTENER_PIVOT_SMB:
+
+		defines = append(defines, "TRANSPORT_SMB")
+		break
+
+	}
+
+	return defines
+}
+```
+[source: `teamserver/pkg/common/builder/builder.go:1102-1120`, entire function]
+
+**This is the answer, and it closes the loop with D34 §6.5 exactly.** The agent's `Transport.c` selects the carrier with `#ifdef TRANSPORT_HTTP` / `#ifdef TRANSPORT_SMB` [D34 §6.1]. **The define that decides which `#ifdef` fires is emitted here, by the server, at payload-generation time.** **There is no runtime negotiation and no capability handshake.**
+
+### 6.2 The two listeners are separate profile blocks — the operator configures one per payload
+
+```go
+type Listeners struct {
+	ListenerHTTP     []*ListenerHTTP     `yaotl:"Http,block"`
+	ListenerSMB      []*ListenerSMB      `yaotl:"Smb,block"`
+	ListenerExternal []*ListenerExternal `yaotl:"External,block"`
+}
+```
+[source: `teamserver/pkg/profile/config.go:51-55`]
+
+**`ListenerHTTP` is a full HTTP listener** — `Hosts`, `HostBind`, `HostRotation`, `PortBind`/`PortConn`, `Methode`, `UserAgent`, `Headers`, `Uris`, `Secure`, and sub-blocks for `Cert`, `Response`, `Proxy` [source: `config.go:57-85`].
+
+**`ListenerSMB` is four fields** — `Name`, `PipeName`, `KillDate`, `WorkingHours` [source: `config.go:87-95`].
+
+**So the SMB carrier's entire configuration is a pipe name, while the HTTP carrier carries TLS material, host rotation, request shaping, and proxy settings.** **That asymmetry is the server-side confirmation of D34 §6.4's finding:** the SMB transport is structurally the simpler one because the pipe's peer-identity check (`SmbRecv`'s `DemonId` validation) does the work that TLS and host rotation do for HTTP.
+
+**And the two listeners are started from two separate loops over two separate config arrays:**
+
+```go
+for _, listener := range t.Profile.Config.Listener.ListenerHTTP {
+```
+```go
+for _, listener := range t.Profile.Config.Listener.ListenerSMB {
+```
+[source: `teamserver/cmd/server/teamserver.go:229`, `:289`]
+
+**The server runs both carriers simultaneously and independently. The agent is bound to one at build time.**
+
+### 6.3 The mismatch path, and it is real
+
+**The `switch` at `builder.go:1105` has no `default`.** If `b.config.ListenerType` is neither `LISTENER_HTTP` nor `LISTENER_PIVOT_SMB`:
+
+1. `defines` is returned **empty**.
+2. The agent is compiled **with neither `TRANSPORT_HTTP` nor `TRANSPORT_SMB` defined.**
+3. In `Transport.c`, **both branches of `TransportSend` are `#ifdef`-guarded** [source: `Transport.c:60-85`; D34 §6.1], so **neither compiles in.**
+4. **What remains is a `TransportSend` with no implementation body — a build failure or a link error, depending on the toolchain.**
+
+**So the failure mode is a failed compile, not a silently dead agent — which is the *better* outcome.** **A carrier mismatch between a built agent and its listener is not possible through this path, because the agent that reaches a listener was built by that same server from that listener's type.**
+
+**But two residual risks follow, and both are real:**
+
+| Risk | Basis |
+|---|---|
+| **A payload generated against an HTTP listener, then deployed expecting to reach an SMB pivot, has no SMB transport.** | The define is fixed at generation. `ListenerType` is read once at `:1105`. |
+| **`GetListenerDefines` returns an empty slice for an unrecognised type without logging.** | The `switch` has no `default` and no `logger` call in this function. |
+
+[source: `builder.go:1102-1120`]
+
+### 6.3.1 The empty-define path IS guarded — one level up, and CORRECTED from my first pass
+
+**The third listener constant exists:**
+
+```go
+LISTENER_HTTP      = 1
+LISTENER_PIVOT_SMB = 2
+LISTENER_EXTERNAL  = 3
+```
+[source: `teamserver/pkg/handlers/types.go:106-108`]
+
+**`LISTENER_EXTERNAL = 3` is absent from `GetListenerDefines`' two cases**, so an external listener would produce an empty define list — **but the build never gets that far:**
+
+```go
+	if b.config.ListenerType == handlers.LISTENER_EXTERNAL {
+		b.SendConsoleMessage("Error", "External listeners are not support for payload build")
+		b.SendConsoleMessage("Error", "Use SMB listener")
+		return false
+	}
+```
+[source: `teamserver/pkg/common/builder/builder.go:234-238`]
+
+**An explicit guard, placed before the build, that names the condition, names the remedy, and returns `false`.** **So the unmatched-type path is NOT reachable with `LISTENER_EXTERNAL` — the build is refused with a console message.** **My §6.3 inference that an unrecognised type yields a silently transportless agent was correct about `GetListenerDefines` in isolation and wrong about the system: the caller guards the one value that reaches it.** **Corrected here rather than in §6.3, because the reasoning mattered.**
+
+**And the guard is itself a positive control on the finding:** **`LISTENER_EXTERNAL` is the one listener type with no transport define, and it is the one listener type the builder explicitly rejects.** **The code knows about the gap and closes it at the entry point rather than in the switch.** **Whether the `switch`'s missing `default` is a latent hazard depends on no future listener type being added without a matching guard — which is a maintenance risk, not a present defect.**
+
+**This is the same shape as the agent's `Command.c` finding one level up: a dispatch with no fallthrough arm and no diagnostic on the unmatched path.** **The build-time analogue of the runtime silent drop.** It reads a config value, fails to match, and returns nothing — **the difference is that an empty define list is caught by the compiler downstream, whereas an unmatched `CommandID` is not caught by anything.**
+
+### 6.4 Positive control
+
+**The claim "there are exactly two carrier types and no third" is an enumeration claim, and the control is that the same search finds the listener enum complete.**
+
+```
+Select-String 'TRANSPORT_HTTP|TRANSPORT_SMB' over teamserver/**/*.go
+   →  exactly 2 hits: builder.go:1109, builder.go:1114
+```
+
+[source: the command, complete output in §6.1's search]
+
+**Two hits, both in `GetListenerDefines`, both assigns.** **The server has no other place that names a transport define — so the carrier decision happens exactly once, in one function.**
+
+**And the listener constants it switches on are themselves declared in one place:**
+
+```
+handlers.LISTENER_HTTP
+handlers.LISTENER_PIVOT_SMB
+```
+[source: `builder.go:1107, 1112`; declared in `teamserver/pkg/handlers/`]
+
+**Note the naming:** the constant is `LISTENER_PIVOT_SMB`, **not `LISTENER_SMB`** — the SMB carrier is registered in the code as a *pivot* listener. **That is consistent with `TransportSmb.c`'s `SmbRecv` peer-validation and with the Rapid7 `server_pivot_named_pipe.c` provenance D34 §5.3 recorded.** **The SMB transport exists to be a pivot, not as a peer to HTTP, and the constant name says so.**
+
+---
+
+## 7. RESIDUAL UNKNOWNS, CORRECTIONS, AND COVERAGE
+
+### 7.1 The five answers, one line each
+
+| Q | Question | Answer |
+|---|---|---|
+| **Q1** | Does the server's dispatch have the agent's silent-drop defect? | **No — `TaskDispatch`'s top-level `switch CommandID` has a `default:` at `demons.go:6419` that names the unknown command and its ID. But it is `logger.Debug`, gated on `logger.debug`, which is `false` unless `--debug`. So the *deployment* is silent on both sides; the *code* is silent on one.** |
+| **Q2** | Does the server's cipher match the agent's? | **Yes — `cipher.NewCTR` + `XORKeyStream` at `aes.go:21-22` is the same AES-CTR/XOR construction as `AesXCryptBuffer`. No mode or IV mismatch. Two differences: server allocates, agent XORs in place; server builds a fresh stream per call, agent mutates a persistent IV context.** |
+| **Q3** | Does the server's unpacker agree on 20? | **Yes — `ParseHeader` consumes 3×4 = 12 bytes (`agent.go:188, 194, 200`) and `handleDemonAgent` consumes 2×4 = 8 (`handlers.go:79-80`). 20, in the same field order. The asymmetry is *where* each side stops encrypting, and §3.3 shows why the keystream still aligns.** |
+| **Q4** | What does `demons.go` register? | **2 functions hold 97.9% of it: `TaskPrepare` (2,157 lines, `switch Command`, 120 cases — operator→agent) and `TaskDispatch` (4,145 lines, `switch CommandID` — agent→server). 5 functions total, 0 types declared, 1 third-party import.** |
+| **Q5** | How does the server pick a carrier? | **`GetListenerDefines` at `builder.go:1102` switches on `b.config.ListenerType` at payload-build time and emits `TRANSPORT_HTTP` or `TRANSPORT_SMB` as a compiler define. Two cases, no `default`. No runtime negotiation. The unmatched type is blocked by an explicit guard at `builder.go:234`.** |
+
+### 7.2 Corrections made in-task, all against a measurement
+
+**Six corrections. Every one was caught by running the invocation rather than restating the claim.**
+
+| # | First statement | Measured | Where |
+|---|---|---|---|
+| 1 | "the Go server has 202 `.go`, of which 25 non-vendor" (tasking) | **202 total, 202 non-vendor, 0 `vendor/` dirs** | §1.1 |
+| 2 | "`Header.Size` is parsed and never used" | **read at `service/agent.go:93`, written at `service/service.go:303`** | §3.5 |
+| 3 | "`dispatch.go` is the server's counterpart to `Command.c`" (tasking) | **`dispatch.go` is the GUI RPC protocol; `TaskDispatch` in `demons.go:2285` is the counterpart** | §4.1 |
+| 4 | stack-map: `:6419` default is in `switch SubCommand` | **brace depth: it is the top-level `default:` of `switch CommandID`** | §4.5.1 |
+| 5 | "`types.go` declares 16 types" | **15** | §5.3 |
+| 6 | "unrecognised listener type yields a silently transportless agent" | **`LISTENER_EXTERNAL` is explicitly rejected at `builder.go:234-238`** | §6.3.1 |
+
+**Corrections 2, 4, 5 and 6 are mine. 1 and 3 are the tasking's, reported in place.**
+
+**Correction 4 is the one worth carrying forward:** two instruments disagreed on the same fact, one of them looked more sophisticated, and the sophisticated one was wrong. **The D11 §8.5 rule — when two instruments disagree, measure directly rather than adjudicate — fired again, in a new form.**
+
+### 7.3 Residual unknowns
+
+| # | Unknown | Why it is open |
+|---|---|---|
+| **U1** | **Does any code path validate the 8 bytes the server decrypts at `handlers.go:102` against the values read at `:79-80`?** | **§3.4 shows no check exists in `handlers.go`. A full sweep of `teamserver/` for a consumer of those re-decrypted bytes was not performed.** |
+| **U2** | **The endianness of the general agent→server ingest path.** | `parser.go:27` defaults `bigEndian = true`; `handlers.go:169` calls `SetBigEndian(false)` **only on the SMB pivot path.** **`Int32ToBuffer` at `Package.c:43-46` writes the size field BIG-endian, which matches the `true` default — but the remaining four header fields are written by `PackageAddInt32`, whose byte order was not read in this task.** |
+| **U3** | **Whether the server's `Packer.Build()` path (§ from D39's first pass: encrypts from offset 0, no 20-byte skip) is ever used for agent-bound traffic.** | `Build()` has **4 call sites** (`dispatch.go:915`, `builder.go:408`, `handlers.go:88`, `handlers.go:287`). **`handlers.go:85-88` builds a `NewPacker(Agent.Encryption.AESKey, ...)` and `AddUInt32(Header.AgentID)` — a reconnect ack, not a task payload. Whether the task-reply path (`BuildPayloadMessage`) uses `Packer.Build()` was not traced.** |
+| **U4** | **`AddOwnSizeFirst` (`packer.go:103`) is called from nowhere.** | **Target `AddOwnSizeFirst` → 1 hit (the declaration). Control `NewPacker` → 6 hits. Control `AddUInt32` → 4 hits.** **Dead code, but "dead" is a claim about the 202-file tree at one moment — no build was run to confirm the linker drops it.** |
+| **U5** | **`TaskPrepare`'s 120 case labels vs `TaskDispatch`'s command cases — do the two vocabularies correspond 1:1?** | 120 outbound labels and the inbound case set were each counted, **but not diffed against each other.** A command the server can *send* that it cannot *receive* (or the reverse) would be here. |
+
+### 7.4 Coverage
+
+**Read in full in this task:** `crypt/aes.go` (25 lines), `packer.go` (109), `parser.go` (207).
+**Read in part:** `handlers/handlers.go` (`:38-137`), `agent/agent.go` (`:181-230`), `cmd/server/server.go` (`:48-69`), `profile/config.go` (`:51-95`), `builder/builder.go` (`:234-238`, `:865-885`, `:1098-1120`), `logger/logger.go` (`:61-71`, `:108-125`), `logger/global.go` (`:20-59`).
+**Enumerated by grammar, not read:** `demons.go` (5 `func` decls counted; `TaskDispatch` L2285–6429 and `TaskPrepare` L128–2284 measured; case/default/switch counts taken on both ranges; the 20 `default:` labels mapped to enclosing switches).
+**Not read:** `cmd/server/dispatch.go` beyond its `func`/`switch`/`default:` skeleton (structure only, §4.1); the 19 sub-command `default:` bodies in `TaskDispatch`; `TaskPrepare`'s 120 case bodies.
+
+**The `pkg/agent/` package is four files — `agent.go` (32,446 B), `commands.go` (6,905 B), `demons.go` (191,942 B), `types.go` (35,257 B).** [source: `Get-ChildItem pkg/agent -File -Filter *.go`] **My first pass of this section cited an `agent/console.go` that does not exist; the `Console` method is `demons.go:6430`.** **Corrected — a coverage list is an easy place to name a file from memory, which is why it is now a measured list.**
+
+**The largest unread surface in this report is the body of `TaskDispatch` — 4,145 lines whose structure is measured and whose branches are not.** **Every claim about it in §4 is a claim about its shape, and §4.3's verdict is a claim about its `default:` arm specifically, which was read at `:6419-6428`.**
+
+### 7.5 What D39 adds to D34, and what it does not
+
+**D34 established the agent half:** a 23-entry function-pointer table with a `NULL` sentinel, a linear search, three known commands with empty `break` bodies, and `PRINTF` compiled to `{ ; }` in release.
+
+**D39 establishes the server half and the comparison:**
+
+1. **The dispatch shapes are DIFFERENT, not mirrored.** The agent uses a table; the server uses a `switch` with a `default:`. **D17 §10's row cannot be applied symmetrically** — the two halves do not share a construct.
+2. **The silence is in a different place on each side.** The agent is silent by *preprocessor*; the server is silent by *runtime flag*. **Neither emits in a default deployment, and neither replies on the wire regardless of the flag.** **So "the agent silently drops and the server does not" is false; "the agent's drop is uncompilable and the server's is unconfigured" is true.**
+3. **The cipher is one implementation in two languages.** CTR/XOR on both sides, matching, with a symmetric nonce-reuse property from the shared fixed-IV construction.
+4. **The 20-byte header is agreed by both sides and assembled differently** — 5 writes on the agent, 3+2 reads across two server files, same order, and §3.3's alignment argument is what makes the differing decrypt spans work.
+5. **The carrier is a build-time define emitted by the server**, closing the loop on D34 §6.1's compile-time observation: **the operator's listener choice at payload-generation is what decides which `#ifdef` the agent was compiled with.**
+
+**D39 does not resolve:** D34's U1 (62 `DEMON_COMMAND_*` defines vs 23 table entries), U2 (who writes the SMB 8-byte read header), or U4 (nonce reuse exploited or not). **All three remain open and are now referenced from two reports.**
+
+---
+
+**End of D39.**

@@ -1693,3 +1693,265 @@ claim it had not verified, and noted that the Windows WinINet driver
 (`drivers\win\wininet\client_windows.go:36`) inherits Windows proxy config by construction, so the answer
 may differ BY PLATFORM.** **That is the correct handling of an attractive convergence: park it, name the
 probe, do not spend the third framework's credibility on an unmeasured match.**
+
+### 15.5 The parked question ANSWERED — proxy inheritance is a THREE-framework convergence
+
+**`D43` closed D36 §9.1, and the answer is YES — Sliver inherits host proxy configuration.** **Lead-verified
+verbatim this round:** `gohttp.go:73` calls `parseProxyConfig(origin, transport, opts.ProxyConfig)`
+**unconditionally at the end of every driver construction**, and the mode switch at `:77-98` reads:
+
+```go
+switch proxyConfig {
+case "never":   break
+case "":        fallthrough
+case "auto":    p := proxy.NewProvider("").GetHTTPSProxy(origin)
+                ...
+                transport.Proxy = http.ProxyURL(proxyURL)   // :96
+default:        /* operator-typed forced URL */
+}
+```
+
+> **In Go the zero value of a string is `""`, and `""` FALLS THROUGH TO `"auto"`. An operator who never
+> touched the setting gets AUTO-DISCOVERY, not `never`. Only the literal `"never"` opts out — which is the
+> opposite of fail-closed, and it is a design statement: built to work behind a corporate proxy by default.**
+
+**The three cross-framework data points now stand:** Havoc `TransportHttp.c:40-42` (`WINHTTP_PROXY_INFO` /
+`WINHTTP_CURRENT_USER_IE_PROXY_CONFIG` / `WINHTTP_AUTOPROXY_OPTIONS`), Metasploit `rex/socket/comm/local.rb`,
+and Sliver's own **15-file / ~86 KB provider package replacing the stdlib.** **`ProxyFromEnvironment`
+returns ZERO hits across the non-vendor implant — against a control of `\bproxy\.` = 41 hits / 11 files
+whose distribution is fully enumerated.** *The stdlib was replaced deliberately, to do MORE discovery than
+Go gives free.*
+
+> **Three frameworks, one behaviour, and the lane refused the flattering reading of it: proxy inheritance
+> is ENTERPRISE REACHABILITY, not concealment.** *"A framework that ignored the host proxy fails to beacon
+> on a large fraction of real targets — not because it's caught, but because its packets never leave."*
+> **Three independent authors converging here is evidence about the DEPLOYMENT ENVIRONMENT they target,
+> not about their tradecraft.** **§15.2's axis is concealment; this one is reachability, and the lane kept
+> them separate** rather than folding a fourth "conceals by" row into a table it does not belong in.
+
+**Two findings beyond the asked question:**
+
+1. **Sliver's two Windows HTTP drivers DISAGREE — and this is a live defect, not a curiosity.**
+   `drivers_windows.go:59-67`: **`WininetDriver` NEVER calls `parseProxyConfig` and never reads
+   `opts.ProxyConfig`** (verified by absence, passing only `opts.AskProxyCreds` at `:65`). **Consequence:
+   `"never"` is SILENTLY NOT HONOURED on the WinINet path.** *Any statement about Sliver's Windows proxy
+   behaviour must name the driver.* **Same defect class as D31's per-transport framing: one implant, two
+   paths, one of them unimplemented — and the operator-facing setting is the one that does not apply.**
+2. **The provider package is derived from Rapid7's InsightVM agent.** Interface docs cite
+   `https://test.endpoint.rapid7.com` (`provider.go:38`) and `provider_windows.go:118` sets
+   **`userAgent = "ir_agent"`** — **the UA Sliver presents when fetching a PAC file.** `[inference]`
+   *"An implant inheriting a commercial vuln-management agent's proxy-discovery library is inheriting code
+   written to traverse every customer's proxy estate."* **Residual §10.5: confirm against `LICENSE.txt`.**
+
+**Platform spread — three platforms, three mechanisms, and one OPSEC cost Havoc does not pay:** Windows
+runs a **4-stage cascade** (`GetIEProxyConfigForCurrentUser` → WPAD autodetect → PAC URL → named proxy →
+`netsh winhttp`), with **stage 1 exceeding Havoc** (`WINHTTP_AUTOPROXY_AUTO_DETECT` over
+`WINHTTP_AUTO_DETECT_TYPE_DHCP | …DNS_A` — **WPAD via DHCP option 252 and DNS-A `wpad.<domain>`**); Linux
+uses `HTTPS_PROXY` env through Sliver's own provider; **Darwin spawns `/usr/sbin/scutil --proxy` as a
+subprocess** (`os/exec`, `provider.go:27`). **A real Sliver-specific OPSEC cost — Havoc's WinHTTP calls
+create no processes.**
+
+**And the discipline that makes this the round's cleanest hand-off:** **the lane quoted the assignment
+(`:96`, `:112`, none for `"never"`) and named the trap it had fallen into in D36** — *the struct literals
+at `:49-54`/`:56-63` do not set `Proxy`, so "a reader who stops at the struct literals concludes 'no proxy
+support.'"* **The decisive line was nine lines below where the previous read stopped.** **This is instrument
+shape #12 inverted: not a probe that matched the assumed token form, but a READ WINDOW that ended one
+statement before the answer** — and the lane that wrote the window is the one that found it.
+It also **declined the `InternetOpenW` flag interpretation** (`InternetOpenTypePreconfigWithNoAutoproxy` is
+*defined* in `generated.go` but the full call site was not read) — **residual §10.1 rather than an
+inference**, which is the same restraint it showed in D36 on the identical question.
+
+---
+
+## 16. HAVOC, BOTH SIDES — the silence is in the BUILD on one side and the CONFIG on the other
+
+**`D39` read the server half of Havoc and inverted its own brief.** The Lead's framing was that
+`cmd\server\dispatch.go` would be the server's counterpart to `Command.c` — **the place where "does the
+server have the same three-empty-`break` defect" would be settled.** **It is not the counterpart at all:**
+`dispatch.go` is the **GUI RPC protocol** — one function, seven switches, one `default:`, **none of them on
+the agent-command path.** **The real counterpart is `TaskDispatch` at `pkg\agent\demons.go:2285` — a SINGLE
+4,145-LINE FUNCTION** whose top-level `switch CommandID` **does have a `default:` at `:6419` that names the
+unknown command and its ID.**
+
+**So the shapes are different, not mirrored** — **the agent uses a 23-entry function-pointer table, the
+server a 4,145-line switch.** But **the silence is not a one-sided bug either**, and the distinction the
+lane drew is the finding:
+
+| | agent (`Command.c`) | server (`TaskDispatch`) |
+|---|---|---|
+| gate | **a PREPROCESSOR** — `PRINTF` → `{ ; }` at `Macros.h:57` | **a RUNTIME BOOLEAN** — `if logger.debug` |
+| default in a deployed build | **uncompilable — the code does not exist** | **`false` unless `--debug`** (`cmd\server.go:57`) |
+| emits in default deployment | **no** | **no** |
+| replies on the wire | **no**` | **no** |
+
+> **"Agent silently drops, server doesn't" is FALSE. "The agent's drop is UNCOMPILABLE, the server's is
+> UNCONFIGURED" is TRUE.** **Two different mechanisms reaching the same silence** — one removed by the
+> compiler, one merely switched off by the default. *The agent cannot be made to log without editing
+> source; the server can be made to log with a flag.* **Same observable, different fixability, and only one
+> of them is a defect.**
+
+**The rest of D39 closes three inherited uncertainties:**
+
+- **Q2 — clean.** `cipher.NewCTR` + `XORKeyStream` (`crypt\aes.go:21-22`) is the **same AES-CTR/XOR** as
+  `AesXCryptBuffer`. **No mode or IV mismatch between server and agent.**
+- **Q3 — the header lengths DISAGREE and it still works, for a reason worth recording.** `ParseHeader`
+  consumes **12 bytes** (`service\agent.go:188/194/200`), `handleDemonAgent` consumes **8**
+  (`handlers\http.go:79-80`) — **yet the payload decrypts, because the server decrypts from `Header.Data`
+  already advanced past 12 while the agent skips 20, and the 8 stray bytes land in `Command`/`RequestID`,
+  which were captured BEFORE the decrypt and never re-read.** **Load-bearing and fragile: the two sides
+  disagree by 8 bytes and the disagreement is absorbed by fields nobody reads after the fact.** *This is
+  D35's reassembly-integrity class — a length mismatch that happens not to matter — found a third time.*
+- **Q5 — closed.** `GetListenerDefines` (`builder.go:1102`) emits `TRANSPORT_HTTP` or `TRANSPORT_SMB`
+  **at BUILD time.** **No negotiation.** **An unmatched type is blocked by an explicit guard at `:234`** —
+  so D34's carrier question is settled: **compile-time on both sides, with a guard.**
+
+**Its instrument record is the most valuable part, and the correction is against ITSELF.** It corrected
+**my** "25 non-vendor" figure (**0 vendor directories — all 202 files are Havoc's**) and `dispatch.go`'s
+role; then corrected its own: `Header.Size` **is** used (`service\agent.go:93`); a stack-based map
+mis-labelled `:6419` (**brace depth proved it top-level**); **16 types → 15**; and an
+*"unrecognised listener type is silently unsafe"* inference (**`LISTENER_EXTERNAL` is explicitly
+rejected**). *"Two instruments disagreed, the more sophisticated one was wrong, and resolving it meant
+measuring the source rather than adjudicating between my own tools."* **That is instrument shape #12 in a
+new form — the failure was not in either probe but in the ACT OF CHOOSING between them.**
+
+---
+
+## 17. COVENANT AUTHORITY — three accounts of one count, and all three were wrong
+
+**`D40` did not answer the question it was given. It refuted the question, twice, and then answered the
+question underneath it. Lead-verified independently this round.**
+
+### 17.1 The lane refused a brief it could not honestly execute
+
+**The brief asked it to verify D32's findings — the 57 namespace collisions, the co-location result, the
+cert-vestige. The lane's reply: *"D32 is not mine. My lanes are D24 and D28. I have no `ZedTest` control and
+no D32 report, so I can't verify those as my own measurements."*** It marked every D32-derived claim as
+**inherited** throughout, and declined D32 §8's routing text because **it sits in a file the lane cannot
+read and a scope it cannot touch.** *"Inventing instructions and then obeying them is not a thing I'll
+do."*
+
+> **This is a Lead error, occurrence EIGHT — a brief that assigned work to a lane that had not done the
+> work it was asked to check.** **D32 was `covenant-diver`... except D32 was delivered by `covenant-diver`
+> and D24/D28 were delivered by `covenant-deep`. The Lead conflated two lanes with similar names.** The
+> lane caught the conflation, refused to fabricate a measurement to cover it, and reported what it could
+> actually measure. **A lane that answers a misaddressed brief by inventing the missing measurements would
+> have produced a fluent, wrong section — and this one did not.**
+
+### 17.2 The count: the Lead said 10, the lane said 7/3, and the truth is neither
+
+**The Lead's brief asserted "the 10 cert-validation sites." The lane measured `7 occurrences / 3 files →
+3 declarations → 2 validate, 1 disabled` and reported what it measured rather than padding to 10.**
+**The Lead then measured it a third way this round — and got a THIRD answer.** *Three accounts, three
+numbers, and the disagreement is entirely a BOUNDARY disagreement:*
+
+| probe shape | count |
+|---|---|
+| Lead's unstated original ("10") | **10 — no run found; the number was asserted in a brief** |
+| lane's: `CertificateValidationCallback` after comment-stripping | **7 occurrences / 3 files** |
+| **Lead this round: `new X509Certificate2(`** | **6 sites / 6 files** |
+| **Lead this round: `RemoteCertificateValidationCallback¦ServerCertificateCustomValidationCallback`** | **9 hits / 7 files** |
+
+**Lead-verified site list (9 callback sites / 7 files):** `Core\CovenantAPIService.cs:23`,
+`Core\CovenantHubService.cs:30`, **`Core\CovenantHubService.cs:42`**, `Data\Grunt\Brute\Brute.cs:556`,
+`Data\Grunt\Brute\BruteStager.cs:63`, `Data\Grunt\GruntHTTP\GruntHTTP.cs:859`,
+`Data\Grunt\GruntHTTP\GruntHTTPStager.cs:62`, `Models\Listeners\InternalListener.cs:107`,
+`Models\Listeners\InternalListener.cs:125`.
+
+**And the boundary the lane got right that the Lead's count obscured:** **`CovenantHubService.cs:42` is not a
+second validation site — it is the PROPAGATION of `:30`'s callback into the inner handler** (`:42`
+`HttpClientHandler.ServerCertificateCustomValidationCallback = clientHandler.ServerCertificateCustomValidationCallback;`).
+**Counting occurrences counts a callback and its own re-assignment as two sites.** *An enumeration is only
+as complete as the detector's shape — and here a detector of the right shape over-counted by counting a
+hand-off as a decision.*
+
+### 17.3 The classification, done from primary source — FOUR categories, not two
+
+**The binary "validates / returns true" was itself too coarse. Classified by reading each callback body:**
+
+| site | verdict | evidence |
+|---|---|---|
+| `CovenantHubService.cs:30` | **UNCONDITIONAL TRUE** | `:27` builds `X509Certificate2 covenantCert`; `:32` `return true;`; `:42` propagates it; **the cert is never referenced again** |
+| `CovenantAPIService.cs:23` | **real hash pin** | `return cert.GetCertHashString() == covenantCert.GetCertHashString();` |
+| `InternalListener.cs:107` | **real hash pin** | `return cert.GetCertHashString() == covenantCert.GetCertHashString();` |
+| `InternalListener.cs:125` | **not a decision** | `return HttpClientHandler;` — a factory body, not a validation |
+| `GruntHTTP.cs:859`, `GruntHTTPStager.cs:62`, `Brute.cs:556`, `BruteStager.cs:63` | **GATED two-stage pin** | see below |
+
+**The Grunt sites are a category nobody had named — validation that is real but DEFAULT-OFF, behind two
+compile-time substitutions.** Read verbatim from `GruntHTTP.cs:859-871`:
+
+```csharp
+ServicePointManager.ServerCertificateValidationCallback = (sender, cert, chain, errors) => {
+    bool valid = true;
+    if (this.UseCertPinning && CovenantCertHash != "") { valid = cert.GetCertHashString() == CovenantCertHash; }
+    if (valid && this.ValidateCert) { valid = errors == System.Net.Security.SslPolicyErrors.None; }
+    return valid;
+};
+```
+
+**Stage 1 IS a real pin** (`cert.GetCertHashString() == CovenantCertHash`) and **stage 2 IS a real chain
+check** (`errors == SslPolicyErrors.None`). **Both are gated.** And **the gates default to whatever
+`CovenantService.cs:1599-1600` substitutes:**
+
+```csharp
+.Replace("{{REPLACE_VALIDATE_CERT}}",     grunt.ValidateCert     ? "true" : "false")
+.Replace("{{REPLACE_USE_CERT_PINNING}}",  grunt.UseCertPinning   ? "true" : "false")
+```
+
+**Lead-verified: 5 hits for each placeholder, all four Grunt-side declarations reading
+`bool.Parse(@"{{REPLACE_...}}")`, and exactly one substitution site each — the generator.**
+
+> **So Covenant's grunt validation is a REAL control whose enablement is decided per-payload by the
+> operator's `grunt` record, and it is OFF unless the operator turns it on.** *Four frameworks, four
+> postures: Sliver's validation is unconditional; Havoc's is in the agent; Pupy's is absent; Covenant's is
+> written correctly and left switched off by default.* **The one thing that makes this a finding rather
+> than a shrug: the vestige at `CovenantHubService.cs:27` shows an author who WROTE the pin, then replaced
+> the comparison with `true` in one place while leaving it intact in four others.**
+
+### 17.4 The real exposure is ONE method — and the 233 was the trap
+
+**`CovenantHub`: 3 public members after comment-stripping, 0 `[Authorize]`, against all five sibling hubs
+carrying it. One method is remotely callable and it is unguarded.**
+
+**`CovenantHubService`: 233 public methods, 0 authorization constructs — and this is the number that would
+have been filed wrongly under any quicker process.** `:24-46` shows it builds an **outbound `HubConnection`
+to `/covenanthub`**, and its DI registration is **commented out at `Startup.cs:196`**. **Those 233 methods
+are client-side RPC STUBS, not endpoints.**
+
+> **"233 unauthenticated endpoints" is denominator species 6 — a correct count of the wrong thing, filed
+> under a heading that makes it read as a different thing.** **The lane named the species itself and
+> refused to write the sentence.** **The real exposure is 1 method, not 233** — and **the reason the error
+> was available is that the file's name contains the hub's name.** *Two classes, one name, opposite
+> directions: a client stub and a server hub.*
+
+**Q3 and Q4 close as CONTROLLED ZEROES:** no middleware file, no filter file, no `IAuthorizationFilter`
+handler, no `AuthorizeFilter` anywhere — **control fires (1 in control, 0 in tree)** — **so no Sliver
+equivalent exists.** And **zero `OnConnectedAsync`/`OnDisconnectedAsync` overrides tree-wide: the client
+PRESENTS a token at `:38`, and nothing REQUIRES one.** **"Presented ≠ required" — connection-time
+authentication does not exist, settled from the connection code rather than from the absence of
+attributes.**
+
+**Q5 offered a third option neither the Lead nor D32 had considered: `return true` IS NOT AN AUTHORIZATION
+MARKER.** **Exactly 1 of 16 `return true` sites tree-wide is a cert callback** — the other 15 are
+grunt-tree traversal, regex matching and messenger lifecycle. **And four of the six coordinates the brief
+supplied do not resolve: the files are at `Data/Grunt/…`, and two have no `return true` at all.** *The
+brief had been written from a stale path and a false marker.* **The six sites are not one pattern six
+times, and not six designs — they are a count of the wrong token.**
+
+### 17.5 The instrument rule, extended by the lane that applied it
+
+**The lane reproduced the Lead's `frida`/`blackfriday` attribution (22 substring / 9 bounded / 13 delta /
+13 `blackfriday` — *delta equals cause*) and then showed the rule was NECESSARY BUT NOT SUFFICIENT:**
+
+> **`\bfrida\b` still matched INSIDE A COMMENT** — **2 when 1 was correct.** **Word boundaries constrain
+> TOKEN SHAPE, not CODE-VS-PROSE. Comment-stripping is required INDEPENDENTLY.**
+
+**And it proved the mechanism: 225 → 3 after stripping, `97.3%` of the file being comments** — **the same
+mechanism as D32's 223× over-count, reproduced.** **Five of its six logged instrument failures are ONE
+shape: counting a lexical string and filing it under a semantic heading.** *Every one fell to the same
+treatment — strip comments, THEN CLASSIFY EACH HIT INSTEAD OF COUNTING IT.*
+
+**D28 §6 closed, and it escalates rather than closes:** **`modules/getsystem.py:194` does
+`self.client.remote('pupwinutils.security', 'getsystem', False)` and drives FOUR of the five functions
+D28 left unread.** **The escalation chain is wired into an operator-exposed module** — which makes D28's
+precondition finding (`SeDebugPrivilege` `:1827` + accessible `winlogon` `:1832`) **more consequential,
+not less.** **`impersonate_sid` is the one with zero external callers.**
