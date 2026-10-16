@@ -9,6 +9,20 @@ Cross-references D40 (authority census), D46 (`CreateHttpListener`), D50 (API/ta
 
 ---
 
+## TOC
+
+- **§0 — Corrections, led with** · §0.1 D40's false zero, reproduced · §0.2 D40's hub table survives · §0.3 **my own arithmetic error** · §0.4 **18 controllers, not 17**
+- **§1 — Q1: D40's census re-run** · 13 figures compared · 4 moved · `AllowAnonymous` (+1 file) · `IsInRole` (never reported) · §1.4 **retracted**
+- **§2 — Q2: the `CreateUser` role** · **§2.1 the answer** · caller cannot choose · first-user bootstrap · §2.6 retraction
+- **§3 — Q3: `CovenantService.cs` authority surface** · 179 reachable methods · **only 2 can see a principal** · `CreateHttpListener` **has a twin**
+- **§4 — Q4: R-52.6.1 closed** · `Token==true` = 5, all `Assembly` · **clean negative, D52 §2.3 stands**
+- **§5 — Instrument record** · failures #15/#16/#17 · species ledger
+- **§6 — Residuals** · R-63.1 … R-63.6
+
+**Headline:** D40's `[Authorize]` figure is wrong in **both** dimensions (8/6 → **25/22**), the error propagated into **four** published figures across two reports, and **D40 contradicts itself** between its line 103 (five files) and line 270 (9/6) — the disagreement is the only surviving trace. Separately: **`CreateUser` grants the caller no role choice; the default is `"User"`; the escalation is confined to an empty user table.**
+
+---
+
 ## §0 — Corrections, led with
 
 ### §0.1 D40's false zero is reproducible, and it is worse than the brief states
@@ -461,15 +475,12 @@ Token = tasking.GruntTask == null ? false : tasking.GruntTask.TokenTask
 
 `[verified]` §3.5 relies on `CovenantHub.cs:162-165` sitting between two block comments (`*/` at `:161`, `/*` at `:166`) to call it live while 221 siblings are commented out. `[inferred]` **This is D32's finding reused, and I read it from source rather than from D32's text.** `[inferred]` **Probe:** run a comment-aware parser over `CovenantHub.cs` and confirm the live-method set has exactly one member.
 
----
+### R-63.7 `[read]` — the mojibake alarm in §5 was itself an instrument artifact
 
-## TOC
+`[verified]` While verifying D63's own encoding I found `pwsh`'s `Get-Content` rendering `# D63 — …` as `# D63 â€" …`, which reads exactly like the D52 double-encoding defect. **Byte-level inspection disproved it:** `U+00A7` is encoded `C2 A7` (§'s correct form), and every double-encoding signature (`C3A2E28094`, `C382`, `E2809D`, `E280A0`) counts **0**. `[verified]`
 
-1. [§1 — Q1: D40's census re-run under the word-bounded instrument](#1-q1-d40s-census-re-run)
-2. [§2 — Q2: what role does a `CreateUser`-created account get?](#2-q2-the-createuser-role)
-3. [§3 — Q3: the authority surface of `CovenantService.cs`](#3-q3-the-authority-surface-of-covenantservicecs)
-4. [§4 — Q4: R-52.6.1, the `Token==true` co-occurrence probe](#4-q4-r-5261-token-co-occurrence)
-5. [§5 — Instrument record](#5-instrument-record)
-6. [§6 — Residual unknowns](#6-residual-unknowns)
+`[inferred]` **The files were never damaged; the console was decoding UTF-8 as cp1252.** §5.3's rule applies to itself: **the question is which system the bytes are being read through.** `[inferred]` **Probe:** none — the byte-level check is authoritative and this residual exists only to prevent the false alarm being re-raised.
 
 ---
+
+*D63 — task-55 — `covenant-diver` — source-only, no REA/GHIDRA. Every figure above was produced by an invocation whose matches are printed in-line.*
