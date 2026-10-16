@@ -1176,6 +1176,67 @@ within one round of being written.** `[source: D33]`
 table and then NEVER ANALYSED.** AAB is a different container from APK, so the APK evidence does not
 cover it. **The corpus committed a second Android binary it never opened.**
 
+#### R-33.5 CLOSED, and §10's "environment blocker" verdict refuted by its own author
+
+**`D37` ran `inspect_android_package`, `decode_android_resources` (apktool 2.12.0) and
+`search_android_classes` (JADX 0.7.1) — all three returned on the FIRST ATTEMPT, no error, no missing
+dependency.** The lane tested each precondition *before* invoking: `REA_JADX_MCP_JAR` present (42.6 MB),
+JDK **21.0.12.1** on PATH.
+
+**The APK digest is `98037b11a118839bef93924a5718c9e988f1c11df507909cdf6bc0cb97189830`** — **Lead-verified
+independently this round, and it matches T3 `:14` exactly.** The provider read the same file the report
+described.
+
+> **Seventeen rounds of ABSENCE-OF-INVOCATION were recorded as ABSENCE-OF-CAPABILITY.** The artifact was
+> attachable, the environment was complete, and **the gap was that nobody had typed the tool's name.**
+> **This is the §12 instrument rule reaching the corpus's own tool inventory** — *a probe that has never
+> succeeded anywhere is untested, not negative*, and a **tool that has never been invoked is untested, not
+> blocked.** The distinction had never been drawn for tools, only for probes.
+
+**But the two cases are NOT the same, and the lane drew the line itself:** `inspect_adb_client` remains
+**genuinely unrun, and its absence is CORRECT** — it enumerates attached devices, and there are none.
+**`inspect_android_package` was never environment-blocked; `inspect_adb_client` is.** *"Provider declares
+the environment is absent" and "we never asked the provider" are different facts, and the corpus had been
+treating the second as the first.*
+
+**R-33.5 closed with a measured answer — Lead-verified `742` APK entries vs `751` AAB entries, both real
+ZIPs (`50 4B 03 04`):** `classes.dex` 3,604,660 B in the APK vs `base/dex/classes.dex` **4,340,284 B** in
+the AAB; `resources.arsc` 267,144 B vs protobuf-packed `base/resources.pb` 501,033 B; **378
+`.kotlin_metadata` files**; `res/` 742 entries in the APK and **0** in the AAB. **Same app, two containers
+— and the lane explicitly flagged that the dex-size difference is expected bundletool behaviour and NOT
+evidence of different code, so that no future reader cites it as a discrepancy.** *A non-finding declared
+as a non-finding is the reason it will stay one.*
+
+**Provenance holds — tested three ways and it PASSES.** 6/6 identity fields (`com.example.reverseshell2`,
+1.0/1, minSdk 16, targetSdk 22, compileSdk 29), **15/15 permissions in the same order**, **18/19 classes by
+name including the `Payloads` subpackage — the 19th being `ExampleInstrumentedTest`, an `androidTest`
+class correctly absent from a release build.** **The lane went looking for a provenance break and filed the
+negative.** Worth recording for the axis: **`SYSTEM_ALERT_WINDOW` is consumed by `jumper` — D3's
+naming-inversion finding, now confirmed at the manifest level.**
+
+**AndroRAT's real size, measured for the first time: 68 of 2,479 `.smali` = 2.7%.** `androidx` 1,369
+(55.2%), `kotlin` 827 (33.4%), `org` 136, `com.example` **68**, `eu.bolt` 57, `android.support`+`kotlinx`
+22. **97.3% of AndroRAT's tree is dependency closure; its real size is 19 classes.** Cross-checked from the
+APK side: 1,304 classes, **18** of them first-party. **`68` vs `18` is the same code counted two ways —
+`.smali` counts anonymous inner classes as files while the class search folds them into parents.** Also
+measured for symmetry: **AhMyth's 411 smali = okhttp3 193 + io.socket 151 + okio 41 + ahmyth 26 → 6.3%
+first-party.** *Same target family, two closures, two ratios — the denominator lesson at a third scale.*
+
+**The lane refused the comparison the Lead invited, and that refusal is the correct result:**
+`D3 §10.1`'s **344 files / 3,042,701 B** boundary **does not agree** with its **2,411 excluded of 2,479**,
+**because they are different targets' dependency closures — AhMyth's okhttp3+io.socket versus AndroRAT's
+AndroidX+Kotlin.** *"They don't agree and they aren't supposed to."* **Stated in §5 so no future reader
+adds them.** **A cross-target figure offered as corroboration would have been denominator species 4.**
+
+**NEW STRUCTURAL FINDING — both Android targets ship a second copy of themselves, of DIFFERENT SPECIES.**
+**AhMyth ships a `.smali` TEMPLATE** (`Factory\Ahmyth\smali\`) that the Electron builder patches at build
+time; **AndroRAT ships a COMPILED AGENT** — Gradle's own `release\` output, committed. **AndroRAT's APK
+carries no machinery to produce other payloads; it *is* the payload.** **That asymmetry explains, from both
+sides, why AhMyth renders 3,275 `.js` and AndroRAT renders none** — and it settles D33's 6× question:
+**both targets are 19 first-party classes presenting 26 vs 68 `.smali` depending on which closure they
+drag.** **The 6× was never a size difference between the RATs. It was a difference between their
+dependency closures.**
+
 **Provenance settled — the 2,479 androrat `.smali` are decompiler output, not hand-written:**
 all sit under `Compiled_apk\`, **200 of 200 sampled files carry a `.source` directive** (apktool /
 baksmali output, developer-shipped). **Top-level packages are `android`, `androidx`, `kotlin`,
@@ -1511,3 +1572,124 @@ a bare `git push` in this repo.**
 2. **An error-suppression flag suppresses the diagnosis with the symptom.** `GIT_TERMINAL_PROMPT=0` is
    correct for automation and **it is exactly why the failure was silent for three attempts.**
    *A flag that makes a tool non-interactive also makes it non-explanatory.*
+
+---
+
+## 15. A THIRD CONCEALMENT MODE — Sliver conceals by NONDETERMINISM, and D31's qualifier is closed
+
+**This section exists because `D36` resolved the one gap `D35` could not, and the answer is a category
+that appears nowhere in the corpus's three-way comparison.**
+
+**The gap, stated by the lane that left it open.** `D31 §8` listed four unread areas and added the honest
+qualifier — *"I did NOT claim Sliver has no cover anywhere, only that the mTLS/WG envelope path has none."*
+**A scoped negative with a named unread boundary is the most useful kind of claim the corpus produces:**
+it is true when written, and it states exactly what would falsify it. **`D31`'s qualifier is now closed
+rather than overturned** — **it was right about the envelope, and right to scope it.**
+
+### 15.1 The mechanism — a per-header PROBABILISTIC profile
+
+**`implant\sliver\transports\httpclient\httpclient.go:248-293` (`newHTTPRequest`).** Each configured header
+carries four fields — `Name`, `Value`, **`Probability`**, `Method` — and on every request the implant rolls:
+
+```go
+probability, _ := strconv.Atoi(header.Probability)
+if 0 < probability {
+    roll := util.Intn(99) + 1
+    if probability < roll { continue }   // skip the header
+}
+req.Header.Set(header.Name, header.Value)
+```
+
+**Verified verbatim at source, including the `Method` gate at `:279-281` and the debug-rolled log at
+`:283`.** `[verified: httpclient.go:248-293]`
+
+> **This is not mimicry. It is VARIATION.** Mimicry aims at a fixed recognisable target — **Pupy: look
+> like *this*.** Variation aims at **non-constancy** — **do not look the same twice.** Against the
+> standard defender method (**collect requests → find invariants → signature the invariant**), **a
+> probabilistic profile denies the invariant an existence.** *You cannot fingerprint a distribution you
+> have not bounded.*
+
+**Sliver's cover is LAYERED, which neither the Lead's framing nor either comparison target anticipated:**
+a **Chrome User-Agent baseline** (`httpclient.go:253`; generator at `server\db\models\http-c2.go:374-379`,
+**parameterised by target OS/arch** — a deliberate mimicry choice), **the probability layer on top of it**,
+and a **cookie jar that ignores origins** (`gohttp.go:116-148`, comment verbatim: *"CookieJar
+implementation that ignores domains/origins"*).
+
+### 15.2 Three frameworks, three concealment theories — now a fourth axis
+
+| framework | conceals by | assumes the defender | source |
+|---|---|---|---|
+| **Havoc** | **encryption** — AES-CTR, carrier-independent framing | **has the traffic, lacks the key** | D34 |
+| **Pupy** | **mimicry** — a trained 513-symbol vocabulary over real provider domains | **has benign traffic to compare against** | D16 |
+| **Sliver (envelope)** | **nothing** — plaintext protobuf + Ed25519 seal | **may be the peer** | D31 |
+| **Sliver (HTTP)** | **VARIATION** — probabilistic headers + randomised payload codec | **tries to correlate and invariant-match** | **D36** |
+
+**§10.3's headline — *"three frameworks, three theories of the adversary — and only one ships a trained
+codebook"* — remains true and is now incomplete.** **Sliver's fourth row is the first concealment mode in
+the corpus that targets CORRELATION rather than CONTENT.** *Havoc hides the bytes; Pupy hides the intent;
+Sliver's HTTP transport hides the PATTERN.*
+
+### 15.3 `english.gz` REFUTED — and the refutation is cleaner than the hypothesis
+
+**The Lead's own hypothesis was that a wordlist would make Sliver and Pupy relatives and change D35's
+conclusion.** **It is a payload codec.** **Lead-verified independently this round, from the primary source,
+with the retained artifact re-derived:**
+
+```
+english.gz          2,713 B  (implant\sliver\encoders\assets\english.gz)
+decompressed        4,988 B
+lines               512
+non-empty           512
+unique              511   (one duplicate: HYPERSALIVATION)
+```
+
+**`512` is a power of two and looks like a training-set tell — and it is NOT one, because the code
+explains it exactly.** `encoders\english.go:39-50`: **one byte in → one word out** (`dictionary[int(b)]`,
+random pick via `util.Intn`). `buildDictionary:67-74` buckets by `sumWord`; **`sumWord:76-81` is
+`sum % 256` → 256 buckets**, so **512 words is exactly 2 per byte value.** **Verified line by line at
+source.** *The round number was a coincidence with a mechanism behind it, and the mechanism is why the
+count was not evidence.*
+
+> **Pupy's words ARE the channel. Sliver's words ARE the payload.** **Zero overlap with Pupy's
+> cloud/CDN vocabulary.** **D35's conclusion is NOT disturbed.**
+
+**And the sharpest detail in D36:** **Sliver has a 512-word vocabulary sitting in its own tree and does
+not use it on the DNS channel** — it is wired into the `Encoder` interface as a payload codec while the DNS
+transport binds `Base32` (`dnsclient.go:170`). **Sliver had the parts for a Pupy-style DNS cover and
+deliberately did not assemble them.** `[inference]` **A capability present and unconnected is a design
+statement, and it is only visible because both halves were read.**
+
+### 15.4 The transport-stratified table, and D35's client side confirmed
+
+| transport | cover | conceals |
+|---|---|---|
+| **HTTP** | probabilistic headers + Chrome UA + origin-blind jar | **request-level invariance / correlation** |
+| DNS | Base32/Base64 alphabet only | alphabet only — **no vocabulary** |
+| mTLS | **none** (0 encoder refs) | nothing — generic TLS |
+| WireGuard | **none** | nothing — generic WG |
+
+**Positive control on the §3 sweep, and it is the correct shape:** encoder grep over `transports/` returns
+**0 in `mtls/`, 0 in `wireguard/`, vs 26 `dnsclient/` and 5 `httpclient/`, against 30 hits in `encoders/`
+itself.** **The probe bites on a known-present target and the zeroes are real** — §12's shape-1 rule.
+
+**D35's architecture is confirmed from the client side:** `dnsclient.go:711` `SplitBuffer(msg, encoder,
+data) ([]string, error)` is a **pure function — emits all fragments at once, no sequence map, no buffer, no
+in-flight table**; decode is per-fragment at `:795`. **Exhaustive grep for `fragment|reassembl|buffer|seq`
+across non-test client files returns only the `SplitBuffer` name, with a working control** (the probe does
+find `conf_windows.go:56` and the six `SplitBuffer` call sites). **The client holds ZERO fragmentation state
+while the server runs `PendingEnvelope.Reassemble` — D35's convergence, now bilaterally measured.**
+
+**`D36`'s outcome is (c) with a mechanism none of the Lead's three options named:** **the cover exists on
+exactly one transport, the design IS inconsistent, and the inconsistency is STRATIFIED rather than
+accidental** — **Sliver conceals by nondeterminism where it controls the request shape (HTTP), and not at
+all where the transport already provides cover (mTLS, WireGuard).** *The cover is an OPERATOR CHOICE
+selected by picking a transport, not a property of the implant.*
+
+**And the lane's single most disciplined act in D36:** **it declined to answer the proxy question.**
+`gohttp.go:65-69` sets `ProxyConnectHeader` but **`Proxy` itself sat outside its read window**, and Go's
+default would mean **`ProxyFromEnvironment` — i.e. the same host-proxy inheritance D34 and D26 already
+found in Havoc and Metasploit.** **It flagged it as residual §9.1 rather than shipping a cross-target
+claim it had not verified, and noted that the Windows WinINet driver
+(`drivers\win\wininet\client_windows.go:36`) inherits Windows proxy config by construction, so the answer
+may differ BY PLATFORM.** **That is the correct handling of an attractive convergence: park it, name the
+probe, do not spend the third framework's credibility on an unmeasured match.**
