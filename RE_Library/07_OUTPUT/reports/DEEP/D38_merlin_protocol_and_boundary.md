@@ -590,18 +590,20 @@ transformers/encrypters/aes.(*Encrypter).String       ← and identically for jw
 
 `[verified]` **Tag counts recomputed by printing matched forms, not by pattern alone** — the method mandated after D29 §5.5:
 
+**Census as of this revision — and read the caveat below before citing these numbers:**
+
 | Tag | Count |
 |---|---|
 | `[verified]` | **79** |
-| `[inference]` | **79** |
+| `[inference]` | **80** |
 | `[absence]` | **14** |
 | `[read]` | **6** |
 
 `[verified]` **METHOD B** for these four figures: literal `IndexOf` walks over the same file text. **Both methods agree on all four.** Exactly **2** unbracketed `` `verified` `` tokens appear as **quoted prose** where this report describes the old inconsistent spelling; they are **excluded** from the counts, verified by reading each in context.
 
-`[verified]` **A tag census of a document that discusses its own tag census is not a stable quantity, and this table moved three times during drafting: 46/63/8/2 → 72/74/14/5 → 76/79/14/5 → 79/79/14/6.** Each move happened because **the section recording the previous miscount was itself tagged.** The figures above were read off the instrument **after the file was otherwise final.**
+`[inference]` **CAVEAT, and it is a real one: these figures cannot be stable, and any value written here is stale by construction.** The table moved **four times** during drafting — `46/63/8/2` → `72/74/14/5` → `76/79/14/5` → `79/79/14/6` → the values above — **every move caused by editing the very section that reports the count.** This is a **fixed-point problem**: the number sits inside the document it measures, so writing it changes it.
 
-`[inference]` **The durable form of this claim is the invocation, not the number** — per the corpus rule that *a numeric claim needs the invocation, not the location.* Anyone can re-derive the census at any revision with:
+`[inference]` **The durable form of the claim is therefore the invocation, not the number** — per the corpus rule that *a numeric claim needs the invocation, not the location.* Re-derive at any revision with:
 
 ```powershell
 $txt = [IO.File]::ReadAllText($f)
@@ -609,7 +611,9 @@ $txt = [IO.File]::ReadAllText($f)
   '{0,-10} {1,4}' -f $_, ([regex]::Matches($txt, '`\[' + $_ + '\]`')).Count }
 ```
 
-`[verified]` **These figures were also wrong in the first draft — 46 / 63 / 8 / 2 — and are corrected here, not quietly fixed.** That is this lane's **sixth** instance of the corpus's one root cause and **D38 failure 3** (§8.5). **The pattern is unmistakable:** every wrong number was written from **memory of the document's shape** rather than read off an instrument. **The correct sequence is measure-then-write; three times here I wrote-then-measured.**
+`[inference]` **Corpus recommendation:** future lanes should report tag counts **with the exact revision or byte size they were taken at**, or omit them and ship the invocation. **A bare tag census with no as-of marker is a claim that silently expires** — D29's `81/51/13/2` carries the same latent staleness.
+
+`[verified]` **The first draft of this section was wrong — `46 / 63 / 8 / 2` — and this is a correction, not a quiet fix.** This lane's **sixth** instance of the corpus's one root cause, and **D38 failure 3** (§8.5). **The pattern is unmistakable:** every wrong number was written from **memory of the document's shape** rather than read off an instrument.
 
 ### 10.5 Scope statement
 

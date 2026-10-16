@@ -53,6 +53,74 @@ git ls-remote origin HEAD          # must match
 git ls-tree -r --name-only HEAD | Select-String 'D3[0-9]_'   # confirm files ARE in the commit
 ```
 
+> **WARNING — `git ls-remote origin HEAD` CAN LIE, and it did.** See §"The repo went 404" below.
+> **Verify against a `ls-remote` on the FULL authenticated URL, not on bare `origin`.**
+
+## The repo went 404 — and the local `ls-remote` kept reporting success (round 18e)
+
+**Symptom:** `git -c credential.helper= push <url> main` → **`remote: Repository not found.`**
+**At the same moment `git ls-remote origin HEAD` returned `3a1729b` — a clean, plausible, WRONG answer.**
+
+**The `origin` value came from the local remote-tracking ref, not from GitHub.** Every real network call
+to that URL failed. **This is the §"instrument traps" defect again, in its purest form: the probe printed
+a value it had not fetched.** *`ls-remote` on a configured remote may answer from local state; there is no
+warning that it did.*
+
+**What was actually true — measured, all five at once:**
+
+| probe | result |
+|---|---|
+| `GET /repos/.../REDDACTED8SEARCH` | **404** |
+| `GET /repos/.../REDDACTED8SEARCH/branches/main` | **404** |
+| `GET /repos/.../REDDACTED8SEARCH/contents/` | **404** |
+| `GET /repos/.../REDDACTED8SEARCH/git/refs` | **404** |
+| `git ls-remote <authenticated url>` | **exit 128, "Repository not found"** |
+| **CONTROL: same command, `youcefnowbi-a11y/void`** | **exit 0, 3 refs returned** |
+| Account repo list | **repo IS listed**, `private=false`, `push=True`, `default_branch=main` |
+| `x-oauth-scopes` on the token | **contains `repo`** |
+
+**So: the token is valid and scoped, the network is fine, the clone is fine, GitHub still lists the repo,
+and eleven sibling repos answer normally with the same token — but this repo's git endpoint, branches,
+contents and refs are all 404, authenticated AND anonymous.**
+
+**Conclusion: a repo-level restriction on `REDACTED8SEARCH`.** The API listing it while every per-repo
+endpoint 404s is the signature of a **disabled/blocked repository**, not a permissions error — a
+permissions error does not 404 the authenticated admin view of a repo the token owns, and it would not
+404 the anonymous view simultaneously.
+
+**Two candidate causes, both consistent, not distinguishable from the outside:**
+1. **The GitHub Push Protection / secret-scanning event already recorded in this file.** The `GH013`
+   block at commit `2e763db0` is on the record; a repo repeatedly containing a live PAT can be restricted.
+2. **An abuse/DMCA action against a public repo named `REDACTED8SEARCH` whose content is C2-framework
+   reverse-engineering tooling.** *A public repo of this content is a plausible abuse target.*
+
+**Not distinguishable without the account's notification email — the only place GitHub states the reason.**
+
+### What this does NOT affect
+
+**Nothing was lost.** Local state is complete and verified:
+
+```
+HEAD            357208f0a677371a8feca0387a0bdb9aee58ed7d
+commits         10
+tree files      285
+tree bytes      5,034,886
+deliverables    46 .md under reports/DEEP
+never pushed    2 commits (16b97d9 D36/D37, 357208f D39/D40/D43)
+local remote-tracking still held: refs/remotes/origin/main 902d035
+```
+
+**The two unpushed commits are the entire exposure, and they are 100% local.** Recovery is one push to
+any working remote.
+
+### Operational rule adopted
+
+**Always push to an EXPLICIT URL with an inline token, and verify by re-reading the remote refs through
+the same authenticated URL.** Do not verify with bare `git ls-remote origin`. **And re-check that the repo
+still exists before assuming a push failure is a credential problem** — this round cost time treating a
+404 as an auth failure, because the earlier `401` diagnosis was the most recent one in memory.
+*A diagnosis that was correct last round is a hypothesis this round.*
+
 ## Diagnosing a hang, if this recurs
 
 ```powershell
